@@ -4,11 +4,17 @@
 
 ## Чому це не черговий PHP-лінтер
 
+Це доведено, не лише задекларовано: `NyxilumProvider` підключає [NyxilumLang](https://github.com/Faneraiy14/NyxilumLang) — зовсім іншу мову з власним лексером/парсером/VM — і структурні правила ловлять ті самі класи багів у `.nx`, що й у `.php`, **без жодної зміни коду правил**.
+
 Правила діляться на три роди — і всі мають ОДИН і той самий інтерфейс `Rule`:
 
-- **Структурні** (`DeadCodeAfterReturnRule`, `EmptyCatchRule`) — дивляться лише на канонічне дерево (`Block`/`Return`/`TryCatch`/`CatchClause`). Жодного натяку на PHP в їхньому коді немає — коли з'явиться провайдер для іншої мови (в планах — [NyxilumLang](https://github.com/Faneraiy14/NyxilumLang), у якої вже є власний AST), ці правила запрацюють для неї без єдиної зміни.
+- **Структурні** (`DeadCodeAfterReturnRule`, `EmptyCatchRule`) — дивляться лише на канонічне дерево (`Block`/`Return`/`TryCatch`/`CatchClause`). Жодного натяку на PHP чи NyxilumLang в їхньому коді немає.
 - **Текстові** (`TodoTrackerRule`, `HardcodedSecretRule`) — сканують сирий текст файлу, ігноруючи AST. Працюють буквально на будь-якому файлі, навіть без зареєстрованого провайдера для його розширення.
 - **Мовно-специфічні** (`UnusedVariableRule`) — семантика "невикористаної змінної" надто різна між мовами, щоб узагальнювати без втрати сенсу, тож це правило читає рідний `PhpParser\Node` напряму (провайдер навмисно зберігає його в кожному вузлі `FunctionDecl`). Той самий інтерфейс `Rule` — просто вужче застосування.
+
+### Як працює `NyxilumProvider`
+
+`nx ast файл.nx` ([AstJsonDumper.cs](https://github.com/Faneraiy14/NyxilumLang/blob/main/src/NyxilumLang/Tools/AstJsonDumper.cs) у самому NyxilumLang) виводить AST одразу в канонічній JSON-схемі `{"type","line","attributes","children"}` — тій самій, яку `PhpProvider` будує з дерева `nikic/php-parser`. `NyxilumProvider` тут лише запускає цей процес і робить `json_decode` — жодного мапування типів вузлів немає, бо узгоджений словник ("що є `Block`/`Return`/`CatchClause`") живе на стороні NyxilumLang. Потребує `nx` у `PATH` (або `NX_EXE=/шлях/до/nx`) — якщо його нема, `.nx`-файли просто пропускаються провайдером, решта аналізу працює як завжди.
 
 ## Встановлення й запуск
 
@@ -39,7 +45,8 @@ src/
   Ast/Node.php          — канонічний вузол (type, line, attributes, children, native)
   LanguageProvider.php  — інтерфейс плагіна мови: supports($file), parse($file): Node
   Rule.php               — інтерфейс правила: check($root, $source, $file): Finding[]
-  Providers/PhpProvider.php  — nikic/php-parser -> канонічне дерево
+  Providers/PhpProvider.php     — nikic/php-parser -> канонічне дерево
+  Providers/NyxilumProvider.php — `nx ast` (JSON) -> канонічне дерево
   Rules/*                — самі правила
   Analyzer.php            — обхід файлів, вибір провайдера, запуск правил
 bin/anylint                — CLI

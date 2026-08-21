@@ -7,6 +7,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
 use AnyLint\Finding;
+use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\EmptyCatchRule;
@@ -40,6 +41,9 @@ if ($path === null) {
 
 $analyzer = (new Analyzer())
     ->withProvider(new PhpProvider())
+    // NX_EXE - шлях до бінарника Nx, якщо він не в PATH під іменем "nx"
+    // (типово при локальній збірці з вихідників, а не встановленого CLI).
+    ->withProvider(new NyxilumProvider(getenv('NX_EXE') ?: 'nx'))
     ->withRule(new DeadCodeAfterReturnRule())
     ->withRule(new EmptyCatchRule())
     ->withRule(new HardcodedSecretRule())

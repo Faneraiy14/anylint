@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
+use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\EmptyCatchRule;
@@ -184,6 +185,67 @@ rrmdir(dirname($f));
 [$exitHelp, $outHelp] = runCli(['--help']);
 check('--help: exit=0', $exitHelp === 0);
 check('--help: показує "anylint"', str_contains($outHelp, 'anylint'));
+
+// --- Тест 9: NyxilumProvider — доказ крос-мовності: ті самі структурні
+// правила ловлять ті самі класи багів у .nx, що й у .php, без жодної
+// зміни коду правил. Пропускається, якщо "nx" недоступний (напр. на CI,
+// де сестринський репозиторій NyxilumLang не зібраний) - не провал, а
+// свідомий skip, як GUI-тести пропускаються в самому NyxilumLang.
+echo "9. NyxilumProvider (.nx) - ті самі структурні правила без змін коду\n";
+$nxExe = getenv('NX_EXE') ?: 'nx';
+$nxAvailable = @proc_close(@proc_open(
+    [$nxExe, '--version'],
+    [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+    $nxPipes,
+)) === 0;
+if (isset($nxPipes)) {
+    foreach ($nxPipes as $p) {
+        is_resource($p) && fclose($p);
+    }
+}
+
+if (!$nxAvailable) {
+    echo "  ⏭️  nx недоступний (NX_EXE не задано чи не в PATH) - пропущено\n";
+} else {
+    function tempNxFile(string $contents): string
+    {
+        $dir = sys_get_temp_dir() . '/anylint_nx_test_' . uniqid('', true);
+        mkdir($dir);
+        $path = $dir . '/test.nx';
+        file_put_contents($path, $contents);
+        return $path;
+    }
+
+    $analyzer = (new Analyzer())
+        ->withProvider(new NyxilumProvider($nxExe))
+        ->withRule(new DeadCodeAfterReturnRule())
+        ->withRule(new EmptyCatchRule())
+        ->withRule(new TodoTrackerRule());
+
+    $f = tempNxFile("func f() {\n    return 1\n    print(\"мертвий код\")\n}\n");
+    $findings = $analyzer->analyzePath($f);
+    $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+    check('dead-code-after-return ловить .nx', count($dead) === 1);
+    rrmdir(dirname($f));
+
+    $f = tempNxFile("func f() {\n    try {\n        g()\n    } catch (e) {\n    }\n}\n");
+    $findings = $analyzer->analyzePath($f);
+    $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
+    check('empty-catch ловить .nx', count($empty) === 1);
+    rrmdir(dirname($f));
+
+    $f = tempNxFile("// TODO: додати перевірку\nfunc f() {}\n");
+    $findings = $analyzer->analyzePath($f);
+    $todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
+    check('todo-tracker ловить .nx (той самий текстовий рушій)', count($todos) === 1);
+    rrmdir(dirname($f));
+
+    $f = tempNxFile("func f() {\n    return 1\n}\n");
+    $findings = $analyzer->analyzePath($f);
+    $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+    check('чистий .nx-код — жодної хибної знахідки', count($dead) === 0);
+    rrmdir(dirname($f));
+}
 
 echo "\n======================================\n";
 echo "Успішно: {$passed} | Провалено: {$failures}\n";

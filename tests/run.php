@@ -135,6 +135,21 @@ $todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
 check('слово "todo" у рядку/ідентифікаторі НЕ ловиться', count($todos) === 0);
 rrmdir(dirname($f));
 
+// URL з "TODO" одразу після "//" (частина схеми http://) - текстовий
+// сканер бачить "//" перед "TODO" й раніше плутав це зі справжнім
+// коментарем, хоча це звичайний рядковий літерал без жодного коментаря.
+$f = tempPhpFile('$url = "http://TODO.example.com/page";');
+$findings = newAnalyzer()->analyzePath($f);
+$todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
+check('"http://TODO..." у рядку — НЕ хибна знахідка', count($todos) === 0);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('$url = "https://TODO.example.com/page";');
+$findings = newAnalyzer()->analyzePath($f);
+$todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
+check('"https://TODO..." у рядку — НЕ хибна знахідка', count($todos) === 0);
+rrmdir(dirname($f));
+
 // --- Тест 5б: замикання — раніше повністю невидимі для структурних
 // правил (усортовуючий callback/array_map як окремий стейтмент не
 // потрапляв у жодну match-гілку PhpProvider::convertStmt, лишався

@@ -60,9 +60,23 @@ final class Analyzer
     /** @return Finding[] */
     private function analyzeFile(string $filePath): array
     {
-        $source = file_get_contents($filePath);
+        // @ навмисно: file_get_contents() інакше друкує сирий PHP Warning
+        // прямо в stderr при недоступному файлі (напр. permission denied),
+        // а сам сценарій нижче однаково перетворює це на керовану Finding -
+        // подвійне повідомлення про ту саму проблему тільки б заважало.
+        $source = @file_get_contents($filePath);
         if ($source === false) {
-            return [];
+            $error = error_get_last();
+            // Файл, який НЕ вдалось прочитати, - це НЕ "чистий" файл: без
+            // цієї Finding --json віддав би "ok": true, приховуючи, що
+            // частина коду взагалі не потрапила під аналіз.
+            return [new Finding(
+                $filePath,
+                1,
+                'unreadable-file',
+                Severity::Error,
+                'Не вдалось прочитати файл: ' . ($error['message'] ?? 'невідома причина'),
+            )];
         }
 
         $findings = [];

@@ -135,12 +135,41 @@ $todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
 check('слово "todo" у рядку/ідентифікаторі НЕ ловиться', count($todos) === 0);
 rrmdir(dirname($f));
 
+// --- Тест 5б: замикання — раніше повністю невидимі для структурних
+// правил (усортовуючий callback/array_map як окремий стейтмент не
+// потрапляв у жодну match-гілку PhpProvider::convertStmt, лишався
+// непрозорим "Other" без рекурсії всередину) ---
+echo "5б. Структурні правила бачать середину замикань\n";
+$f = tempPhpFile('array_map(function ($x) { return $x; echo "мертвий"; }, $a);');
+$findings = newAnalyzer()->analyzePath($f);
+$dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+check('dead-code у замиканні-аргументі знайдено', count($dead) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('$fn = function () { try { g(); } catch (\Exception $e) { } };');
+$findings = newAnalyzer()->analyzePath($f);
+$empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
+check('empty-catch у замиканні-присвоєнні знайдено', count($empty) === 1);
+rrmdir(dirname($f));
+
 // --- Тест 6: синтаксична помилка PHP не валить увесь прогін ---
 echo "6. Синтаксична помилка — Finding, не крах\n";
 $f = tempPhpFile('function f( {{{ зламаний синтаксис');
 $findings = newAnalyzer()->analyzePath($f);
 $errors = array_filter($findings, fn ($x) => $x->rule === 'parse-error');
 check('parse-error Finding створено', count($errors) === 1);
+rrmdir(dirname($f));
+
+// --- Тест 6б: файл без прав на читання - Finding, а не мовчазний
+// "ok: true" (раніше file_get_contents() повертав false, Analyzer тихо
+// повертав [] - permission-denied файл рахувався "чистим") ---
+echo "6б. Непридатний для читання файл — Finding, не мовчазне ok=true\n";
+$f = tempPhpFile('function f() { return 1; }');
+chmod($f, 0000);
+$findings = newAnalyzer()->analyzePath($f);
+$unreadable = array_filter($findings, fn ($x) => $x->rule === 'unreadable-file');
+check('unreadable-file Finding створено', count($unreadable) === 1);
+chmod($f, 0644);
 rrmdir(dirname($f));
 
 // --- Тест 7: рекурсивне сканування директорії, пропуск vendor/.git ---
@@ -185,6 +214,21 @@ rrmdir(dirname($f));
 [$exitHelp, $outHelp] = runCli(['--help']);
 check('--help: exit=0', $exitHelp === 0);
 check('--help: показує "anylint"', str_contains($outHelp, 'anylint'));
+
+// --- Тест 8б: невалідний UTF-8 у повідомленні Finding (напр. текст
+// TODO-коментаря) НЕ ламає --json мовчки. Раніше json_encode() без
+// JSON_INVALID_UTF8_SUBSTITUTE повертав false на невалідному байті -
+// --json друкував ПОРОЖНІЙ рядок з exit-кодом 1 (провал є, даних нема) ---
+echo "8б. --json переживає невалідний UTF-8 у повідомленні\n";
+$dir = sys_get_temp_dir() . '/anylint_utf8_' . uniqid('', true);
+mkdir($dir);
+$path = $dir . '/test.php';
+file_put_contents($path, "<?php\n// TODO: зробити щось \xffпоганим байтом\n");
+[$exitBad, $outBad] = runCli([$path, '--json']);
+$decoded = json_decode($outBad, true);
+check('--json повертає валідний JSON, не порожній рядок', $decoded !== null);
+check('--json: findings непорожні (TODO таки знайдено)', $decoded !== null && count($decoded['findings']) === 1);
+rrmdir($dir);
 
 // --- Тест 9: NyxilumProvider — доказ крос-мовності: ті самі структурні
 // правила ловлять ті самі класи багів у .nx, що й у .php, без жодної

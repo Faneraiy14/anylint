@@ -10,6 +10,7 @@ use PhpParser\Error as PhpParseError;
 use PhpParser\Node as PhpNode;
 use PhpParser\Node\Stmt;
 use PhpParser\Node\Expr;
+use PhpParser\NodeFinder;
 use PhpParser\ParserFactory;
 
 final class PhpProvider implements LanguageProvider
@@ -64,7 +65,14 @@ final class PhpProvider implements LanguageProvider
                 $stmt->stmts !== null ? [$this->convertStmts($stmt->stmts)] : [],
                 $stmt,
             ),
-            $stmt instanceof Stmt\Return_ => new Node('Return', $line, [], [], $stmt),
+            // Замикання в значенні return: "return function() { ... };".
+            $stmt instanceof Stmt\Return_ => new Node(
+                'Return',
+                $line,
+                [],
+                $stmt->expr !== null ? $this->findNestedClosures($stmt->expr) : [],
+                $stmt,
+            ),
             $stmt instanceof Stmt\TryCatch => new Node(
                 'TryCatch',
                 $line,
@@ -94,14 +102,54 @@ final class PhpProvider implements LanguageProvider
             $stmt instanceof Stmt\Do_ => new Node('Do', $line, [], [$this->convertStmts($stmt->stmts)]),
             $stmt instanceof Stmt\For_ => new Node('For', $line, [], [$this->convertStmts($stmt->stmts)]),
             $stmt instanceof Stmt\Foreach_ => new Node('Foreach', $line, [], [$this->convertStmts($stmt->stmts)]),
+            // Замикання у правій частині присвоєння: "$fn = function() {...};".
             $stmt instanceof Stmt\Expression && $stmt->expr instanceof Expr\Assign => new Node(
                 'Assign',
                 $line,
                 [],
-                [],
+                $this->findNestedClosures($stmt->expr->expr),
                 $stmt->expr,
             ),
-            default => new Node('Other', $line, ['kind' => $stmt::class], [], $stmt),
+            // Замикання-аргументи ("usort($a, function(){...})",
+            // "array_map(function(){...}, $a)") потрапляють САМЕ сюди -
+            // виклик функції як окремий стейтмент не має власного case
+            // вище, тож без findNestedClosures() тіло такого замикання
+            // було б цілком невидиме для структурних правил (dead-code-
+            // after-return/empty-catch не бачили б нічого всередині).
+            default => new Node(
+                'Other',
+                $line,
+                ['kind' => $stmt::class],
+                $this->findNestedClosures($stmt),
+                $stmt,
+            ),
         };
+    }
+
+    /**
+     * Знаходить замикання (Expr\Closure) БУДЬ-ДЕ у виразі - аргумент
+     * виклику, елемент масиву, тернарник тощо - і перетворює тіло кожного
+     * в такий самий канонічний FunctionDecl, що й звичайна функція, тож
+     * dead-code-after-return/empty-catch бачать середину замикань так
+     * само, як середину звичайних function-оголошень.
+     *
+     * НЕ викликається для стейтментів, що вже рекурсивно конвертуються
+     * через ->stmts (Function_/TryCatch/If/While/...) - їхні ВЛАСНІ
+     * вкладені стейтменти пройдуть через convertStmt() і самі знайдуть
+     * замикання на своєму рівні; повторний виклик тут спричинив би
+     * дублювання знахідок (і зайву роботу) для кожного рівня вкладеності.
+     *
+     * @return Node[]
+     */
+    private function findNestedClosures(PhpNode $expr): array
+    {
+        $closures = (new NodeFinder())->find($expr, fn (PhpNode $n) => $n instanceof Expr\Closure);
+        return array_map(fn (Expr\Closure $c) => new Node(
+            'FunctionDecl',
+            $c->getLine(),
+            ['name' => '{closure}'],
+            [$this->convertStmts($c->stmts)],
+            $c,
+        ), $closures);
     }
 }

@@ -70,7 +70,12 @@ if ($json) {
             'severity' => $f->severity->value,
             'message' => $f->message,
         ], $findings),
-    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n";
+    // JSON_INVALID_UTF8_SUBSTITUTE: без нього json_encode() МОВЧКИ повертає
+    // false, якщо повідомлення будь-якої Finding (напр. текст TODO-коментаря
+    // чи ім'я процесу) містить хоч один невалідний UTF-8 байт - --json тоді
+    // друкує ПОРОЖНІЙ рядок з exit-кодом 1, а споживач (CI) отримує
+    // "помилка є, але дані порожні" замість реального звіту.
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
     exit($findings === [] ? 0 : 1);
 }
 

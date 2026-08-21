@@ -1,0 +1,92 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use AnyLint\Analyzer;
+use AnyLint\Finding;
+use AnyLint\Providers\PhpProvider;
+use AnyLint\Rules\DeadCodeAfterReturnRule;
+use AnyLint\Rules\EmptyCatchRule;
+use AnyLint\Rules\HardcodedSecretRule;
+use AnyLint\Rules\TodoTrackerRule;
+use AnyLint\Rules\UnusedVariableRule;
+use AnyLint\Severity;
+
+$args = array_slice($argv, 1);
+
+if (in_array('--help', $args, true) || $args === []) {
+    echo "anylint <шлях> [--json] [--no-todo]\n";
+    echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
+    echo "  Наразі: PHP (nikic/php-parser). NyxilumLang - у розробці.\n";
+    exit(0);
+}
+
+$json = in_array('--json', $args, true);
+$noTodo = in_array('--no-todo', $args, true);
+$path = null;
+foreach ($args as $arg) {
+    if (!str_starts_with($arg, '--')) {
+        $path = $arg;
+        break;
+    }
+}
+if ($path === null) {
+    fwrite(STDERR, "Не вказано шлях для аналізу.\n");
+    exit(2);
+}
+
+$analyzer = (new Analyzer())
+    ->withProvider(new PhpProvider())
+    ->withRule(new DeadCodeAfterReturnRule())
+    ->withRule(new EmptyCatchRule())
+    ->withRule(new HardcodedSecretRule())
+    ->withRule(new UnusedVariableRule());
+
+if (!$noTodo) {
+    $analyzer->withRule(new TodoTrackerRule());
+}
+
+try {
+    $findings = $analyzer->analyzePath($path);
+} catch (\RuntimeException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
+    exit(2);
+}
+
+if ($json) {
+    echo json_encode([
+        'ok' => $findings === [],
+        'findings' => array_map(static fn (Finding $f) => [
+            'file' => $f->file,
+            'line' => $f->line,
+            'rule' => $f->rule,
+            'severity' => $f->severity->value,
+            'message' => $f->message,
+        ], $findings),
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n";
+    exit($findings === [] ? 0 : 1);
+}
+
+$hasError = false;
+foreach ($findings as $finding) {
+    $icon = match ($finding->severity) {
+        Severity::Error => '❌',
+        Severity::Warning => '⚠️ ',
+        Severity::Info => 'ℹ️ ',
+    };
+    if ($finding->severity === Severity::Error) {
+        $hasError = true;
+    }
+    echo "{$icon} {$finding->file}:{$finding->line} [{$finding->rule}] {$finding->message}\n";
+}
+
+if ($findings === []) {
+    echo "Проблем не знайдено.\n";
+    exit(0);
+}
+
+echo "\nЗнайдено: " . count($findings) . "\n";
+exit($hasError ? 1 : 0);

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Матриця версій PHP - не лише мінімальна з composer.json, а й
+        # найновіші/experimental: нова версія PHP (deprecations,
+        # видалені функції) мала б зламати CI ТУТ, за кілька хвилин після
+        # релізу PHP, а не виявитись через рік болючим переписуванням
+        # половини проєкту (як було з сайтом на старовинному PHP).
+        php-version: ['8.1', '8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP ${{ matrix.php-version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run test suite
+        run: php tests/run.php
+
+      - name: Self-analysis (dogfooding)
+        run: php bin/anylint src --json
+
+  # Окрема нічна перевірка на PHP "nightly" - найранніший можливий сигнал
+  # про майбутню несумісність, ще ДО стабільного релізу нової версії.
+  nightly:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP nightly
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Run test suite
+        run: php tests/run.php

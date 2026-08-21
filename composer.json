@@ -1,0 +1,17 @@
+{
+    "name": "faneraiy14/anylint",
+    "description": "Кросплатформний статичний аналізатор коду з архітектурою плагінів під мови (PHP, NyxilumLang)",
+    "type": "project",
+    "license": "MIT",
+    "authors": [{"name": "Faneraiy14"}],
+    "require": {
+        "php": ">=8.1",
+        "nikic/php-parser": "^5.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "AnyLint\\": "src/"
+        }
+    },
+    "bin": ["bin/anylint"]
+}

@@ -193,11 +193,12 @@ check('--help: показує "anylint"', str_contains($outHelp, 'anylint'));
 // свідомий skip, як GUI-тести пропускаються в самому NyxilumLang.
 echo "9. NyxilumProvider (.nx) - ті самі структурні правила без змін коду\n";
 $nxExe = getenv('NX_EXE') ?: 'nx';
-$nxAvailable = @proc_close(@proc_open(
-    [$nxExe, '--version'],
-    [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-    $nxPipes,
-)) === 0;
+// proc_open() повертає false (не resource), якщо виконуваний файл не
+// знайдено - passing false у proc_close() кидає TypeError навіть під @
+// (той придушує лише warning/notice, не помилки типів), тож перевіряємо
+// is_resource() ЯВНО, перш ніж узагалі торкатись $nxProcess.
+$nxProcess = @proc_open([$nxExe, '--version'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $nxPipes);
+$nxAvailable = is_resource($nxProcess) && proc_close($nxProcess) === 0;
 if (isset($nxPipes)) {
     foreach ($nxPipes as $p) {
         is_resource($p) && fclose($p);

@@ -4,7 +4,7 @@
 
 ## Чому це не черговий PHP-лінтер
 
-Це доведено, не лише задекларовано: `NyxilumProvider` підключає [NyxilumLang](https://github.com/Faneraiy14/NyxilumLang) — зовсім іншу мову з власним лексером/парсером/VM — а `JavaScriptProvider`/`TypeScriptProvider` шлють файл через TypeScript compiler API. Структурні правила ловлять ті самі класи багів у `.nx`, `.js` і `.ts`, що й у `.php`, **без жодної зміни коду правил**.
+Це доведено, не лише задекларовано: `NyxilumProvider` підключає [NyxilumLang](https://github.com/Faneraiy14/NyxilumLang) — зовсім іншу мову з власним лексером/парсером/VM, `JavaScriptProvider`/`TypeScriptProvider` шлють файл через TypeScript compiler API, а `CProvider`/`CppProvider`/`CSharpProvider`/`JavaProvider` — через tree-sitter. Структурні правила ловлять ті самі класи багів у `.nx`, `.js`, `.ts`, `.c`, `.cpp`, `.cs` і `.java`, що й у `.php`, **без жодної зміни коду правил**.
 
 Правила діляться на три роди — і всі мають ОДИН і той самий інтерфейс `Rule`:
 
@@ -20,6 +20,10 @@
 
 Той самий трюк, що й з `nx ast`, тільки виконавчий інструмент — власний `tools/js-ast-dump/dump.js`: TypeScript compiler API (пакет `typescript`, парсить і `.js`, і `.ts` — `allowJs` там лише про перевірку типів, парсер спільний) обходить `ts.Node`-дерево і вже сам віддає ту саму канонічну JSON-схему. `.js`/`.jsx`/`.mjs`/`.cjs` і `.ts`/`.tsx` — це два окремі класи-провайдери (один плагін = одна мова), але обидва діляться спільною логікою запуску процесу через `AbstractJsFamilyProvider`. Потребує `node` у `PATH` (або `NODE_EXE=...`) і встановлених залежностей у `tools/js-ast-dump` (`npm install` там один раз) — без цього `.js`/`.ts`-файли так само отримують `parse-error` Finding, а не мовчазний збій усього прогону.
 
+### Як працюють `CProvider`/`CppProvider`/`CSharpProvider`/`JavaProvider`
+
+Для родини C-подібних мов немає одного спільного офіційного compiler API (на відміну від TypeScript для JS/TS), тож тут — [tree-sitter](https://tree-sitter.github.io/) через `web-tree-sitter` (WASM-рантайм, БЕЗ нативної компіляції) і прекомпільовані `.wasm`-граматики з пакета `tree-sitter-wasms`. `tools/treesitter-ast-dump/dump.js` бере мову ПЕРШИМ аргументом (`c`/`cpp`/`c_sharp`/`java`) і сам обирає потрібну граматику — той самий процес, що й для JS/TS, лише один движок обслуговує чотири мови одразу. Кожна tree-sitter-граматика називає свій "блок коду" по-своєму (`compound_statement` у C/C++, `block` у C#/Java) — ця відповідність зафіксована в `LANG_CONFIG` усередині dump.js, а не вгадується налету. Потребує `node` у `PATH` і `npm install` у `tools/treesitter-ast-dump` — так само, як і для JS/TS-дампера.
+
 ## Встановлення й запуск
 
 ```bash
@@ -27,10 +31,11 @@ composer install
 php bin/anylint шлях/до/коду
 ```
 
-Для аналізу `.js`/`.ts`-файлів додатково потрібно один раз:
+Для аналізу `.js`/`.ts`- і `.c`/`.cpp`/`.cs`/`.java`-файлів додатково потрібно один раз:
 
 ```bash
 cd tools/js-ast-dump && npm install && cd -
+cd tools/treesitter-ast-dump && npm install && cd -
 ```
 
 ```bash
@@ -59,7 +64,10 @@ src/
   Providers/NyxilumProvider.php — `nx ast` (JSON) -> канонічне дерево
   Providers/AbstractJsFamilyProvider.php — спільний запуск tools/js-ast-dump/dump.js -> канонічне дерево
   Providers/JavaScriptProvider.php, TypeScriptProvider.php — розширення файлів для AbstractJsFamilyProvider
-tools/js-ast-dump/dump.js  — TypeScript compiler API -> та сама канонічна JSON-схема, що й "nx ast"
+  Providers/AbstractTreeSitterProvider.php — спільний запуск tools/treesitter-ast-dump/dump.js -> канонічне дерево
+  Providers/CProvider.php, CppProvider.php, CSharpProvider.php, JavaProvider.php — розширення файлів + мова tree-sitter для AbstractTreeSitterProvider
+tools/js-ast-dump/dump.js          — TypeScript compiler API -> та сама канонічна JSON-схема, що й "nx ast"
+tools/treesitter-ast-dump/dump.js  — tree-sitter (C/C++/C#/Java) -> та сама канонічна JSON-схема
   Rules/*                — самі правила
   Analyzer.php            — обхід файлів, вибір провайдера, запуск правил
 bin/anylint                — CLI

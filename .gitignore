@@ -1,3 +1,4 @@
 /vendor/
 /tools/js-ast-dump/node_modules/
+/tools/treesitter-ast-dump/node_modules/
 *.log

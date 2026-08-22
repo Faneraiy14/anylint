@@ -5,6 +5,10 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
+use AnyLint\Providers\CProvider;
+use AnyLint\Providers\CppProvider;
+use AnyLint\Providers\CSharpProvider;
+use AnyLint\Providers\JavaProvider;
 use AnyLint\Providers\JavaScriptProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
@@ -360,6 +364,79 @@ if (!$nodeAvailable) {
         $findings = $analyzer->analyzePath($f);
         $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
         check("чистий .{$ext}-код — жодної хибної знахідки", count($dead) === 0);
+        rrmdir(dirname($f));
+    }
+}
+
+echo "11. C/C++/C#/Java-провайдери (node dump.js, tree-sitter) - ті самі структурні правила без змін коду\n";
+$treesitterDump = __DIR__ . '/../tools/treesitter-ast-dump/dump.js';
+$tsProcess = @proc_open([$nodeExe, '-e', "require.resolve('web-tree-sitter', {paths: ['" . dirname($treesitterDump) . "']})"], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $tsPipes);
+$treesitterAvailable = is_resource($tsProcess) && proc_close($tsProcess) === 0;
+if (isset($tsPipes)) {
+    foreach ($tsPipes as $p) {
+        is_resource($p) && fclose($p);
+    }
+}
+
+if (!$treesitterAvailable) {
+    echo "  ⏭️  node/web-tree-sitter недоступні ('npm install' не виконано в tools/treesitter-ast-dump) - пропущено\n";
+} else {
+    /** @var array<string, array{ext: string, provider: \AnyLint\LanguageProvider, dead: string, catch: string|null}> $cFamilyCases */
+    $cFamilyCases = [
+        'C' => [
+            'ext' => 'c',
+            'provider' => new CProvider($nodeExe),
+            'dead' => "int f() {\n  if (1) {\n    return 1;\n    dead();\n  }\n  return 0;\n}\n",
+            'catch' => null,
+            'clean' => "int f() {\n  if (1) {\n    return 1;\n  }\n  return 0;\n}\n",
+        ],
+        'C++' => [
+            'ext' => 'cpp',
+            'provider' => new CppProvider($nodeExe),
+            'dead' => "int f() {\n  while (1) {\n    return 1;\n    dead();\n  }\n}\n",
+            'catch' => "int f() {\n  try {\n    g();\n  } catch (int e) {\n  }\n  return 0;\n}\n",
+            'clean' => "int f() {\n  while (1) {\n    return 1;\n  }\n}\n",
+        ],
+        'C#' => [
+            'ext' => 'cs',
+            'provider' => new CSharpProvider($nodeExe),
+            'dead' => "class A {\n  int F() {\n    if (x) {\n      return 1;\n      Dead();\n    }\n    return 0;\n  }\n}\n",
+            'catch' => "class A {\n  int F() {\n    try {\n      G();\n    } catch (Exception e) {\n    }\n    return 0;\n  }\n}\n",
+            'clean' => "class A {\n  int F() {\n    if (x) {\n      return 1;\n    }\n    return 0;\n  }\n}\n",
+        ],
+        'Java' => [
+            'ext' => 'java',
+            'provider' => new JavaProvider($nodeExe),
+            'dead' => "class A {\n  int f() {\n    for (int i = 0; i < 1; i++) {\n      return 1;\n      dead();\n    }\n    return 0;\n  }\n}\n",
+            'catch' => "class A {\n  int f() {\n    try {\n      g();\n    } catch (Exception e) {\n    }\n    return 0;\n  }\n}\n",
+            'clean' => "class A {\n  int f() {\n    for (int i = 0; i < 1; i++) {\n      return 1;\n    }\n    return 0;\n  }\n}\n",
+        ],
+    ];
+
+    foreach ($cFamilyCases as $langName => $case) {
+        $analyzer = (new Analyzer())
+            ->withProvider($case['provider'])
+            ->withRule(new DeadCodeAfterReturnRule())
+            ->withRule(new EmptyCatchRule());
+
+        $f = tempJsFile($case['ext'], $case['dead']);
+        $findings = $analyzer->analyzePath($f);
+        $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+        check("dead-code-after-return ловить {$langName}", count($dead) === 1);
+        rrmdir(dirname($f));
+
+        if ($case['catch'] !== null) {
+            $f = tempJsFile($case['ext'], $case['catch']);
+            $findings = $analyzer->analyzePath($f);
+            $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
+            check("empty-catch ловить {$langName}", count($empty) === 1);
+            rrmdir(dirname($f));
+        }
+
+        $f = tempJsFile($case['ext'], $case['clean']);
+        $findings = $analyzer->analyzePath($f);
+        $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+        check("чистий {$langName}-код — жодної хибної знахідки", count($dead) === 0);
         rrmdir(dirname($f));
     }
 }

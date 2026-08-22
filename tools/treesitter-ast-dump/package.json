@@ -1,0 +1,9 @@
+{
+  "name": "anylint-treesitter-ast-dump",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "web-tree-sitter": "^0.25.0",
+    "tree-sitter-wasms": "^0.1.13"
+  }
+}

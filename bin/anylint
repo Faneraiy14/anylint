@@ -7,6 +7,10 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
 use AnyLint\Finding;
+use AnyLint\Providers\CProvider;
+use AnyLint\Providers\CppProvider;
+use AnyLint\Providers\CSharpProvider;
+use AnyLint\Providers\JavaProvider;
 use AnyLint\Providers\JavaScriptProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
@@ -23,7 +27,7 @@ $args = array_slice($argv, 1);
 if (in_array('--help', $args, true) || $args === []) {
     echo "anylint <шлях> [--json] [--no-todo]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
-    echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript.\n";
+    echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java.\n";
     exit(0);
 }
 
@@ -52,6 +56,13 @@ $analyzer = (new Analyzer())
     // .ts - allowJs лише про перевірку типів, парсер спільний).
     ->withProvider(new JavaScriptProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new TypeScriptProvider(getenv('NODE_EXE') ?: 'node'))
+    // Родина C-подібних мов - один движок tree-sitter (tools/treesitter-
+    // ast-dump/dump.js), кожен провайдер лише передає свою мову як
+    // аргумент і має власне supports() за розширенням файлу.
+    ->withProvider(new CProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new CppProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new CSharpProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new JavaProvider(getenv('NODE_EXE') ?: 'node'))
     ->withRule(new DeadCodeAfterReturnRule())
     ->withRule(new EmptyCatchRule())
     ->withRule(new HardcodedSecretRule())

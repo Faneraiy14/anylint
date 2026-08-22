@@ -1,0 +1,9 @@
+{
+  "name": "anylint-js-ast-dump",
+  "private": true,
+  "description": "Допоміжний CLI: 'node dump.js файл.ts' виводить AST у канонічній JSON-схемі AnyLint ({type,line,attributes,children}) - той самий контракт, що й 'nx ast' для NyxilumLang. JavaScriptProvider/TypeScriptProvider у PHP лише запускають цей процес і роблять json_decode.",
+  "type": "commonjs",
+  "dependencies": {
+    "typescript": "^5.6.0"
+  }
+}

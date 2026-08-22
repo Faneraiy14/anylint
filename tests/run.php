@@ -5,8 +5,10 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
+use AnyLint\Providers\JavaScriptProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
+use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\HardcodedSecretRule;
@@ -305,6 +307,61 @@ if (!$nxAvailable) {
     $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
     check('чистий .nx-код — жодної хибної знахідки', count($dead) === 0);
     rrmdir(dirname($f));
+}
+
+echo "10. JavaScriptProvider/TypeScriptProvider (node dump.js) - ті самі структурні правила без змін коду\n";
+$nodeExe = getenv('NODE_EXE') ?: 'node';
+$dumpScript = __DIR__ . '/../tools/js-ast-dump/dump.js';
+$nodeProcess = @proc_open([$nodeExe, '-e', "require.resolve('typescript', {paths: ['" . dirname($dumpScript) . "']})"], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $nodePipes);
+$nodeAvailable = is_resource($nodeProcess) && proc_close($nodeProcess) === 0;
+if (isset($nodePipes)) {
+    foreach ($nodePipes as $p) {
+        is_resource($p) && fclose($p);
+    }
+}
+
+if (!$nodeAvailable) {
+    echo "  ⏭️  node/typescript недоступні (node не в PATH або 'npm install' не виконано в tools/js-ast-dump) - пропущено\n";
+} else {
+    function tempJsFile(string $ext, string $contents): string
+    {
+        $dir = sys_get_temp_dir() . '/anylint_js_test_' . uniqid('', true);
+        mkdir($dir);
+        $path = $dir . '/test.' . $ext;
+        file_put_contents($path, $contents);
+        return $path;
+    }
+
+    foreach (['js' => new JavaScriptProvider($nodeExe), 'ts' => new TypeScriptProvider($nodeExe)] as $ext => $provider) {
+        $analyzer = (new Analyzer())
+            ->withProvider($provider)
+            ->withRule(new DeadCodeAfterReturnRule())
+            ->withRule(new EmptyCatchRule());
+
+        $f = tempJsFile($ext, "function f() {\n  return 1;\n  console.log('мертвий код');\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+        check("dead-code-after-return ловить .{$ext}", count($dead) === 1);
+        rrmdir(dirname($f));
+
+        $f = tempJsFile($ext, "function f() {\n  return (() => {\n    return 1;\n    console.log('мертвий код у замиканні');\n  })();\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+        check("dead-code-after-return ловить .{$ext} у вкладеній стрілочній функції", count($dead) === 1);
+        rrmdir(dirname($f));
+
+        $f = tempJsFile($ext, "function f() {\n  try {\n    g();\n  } catch (e) {\n  }\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
+        check("empty-catch ловить .{$ext}", count($empty) === 1);
+        rrmdir(dirname($f));
+
+        $f = tempJsFile($ext, "function f() {\n  return 1;\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+        check("чистий .{$ext}-код — жодної хибної знахідки", count($dead) === 0);
+        rrmdir(dirname($f));
+    }
 }
 
 echo "\n======================================\n";

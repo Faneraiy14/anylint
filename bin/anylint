@@ -7,8 +7,10 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
 use AnyLint\Finding;
+use AnyLint\Providers\JavaScriptProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
+use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\HardcodedSecretRule;
@@ -21,7 +23,7 @@ $args = array_slice($argv, 1);
 if (in_array('--help', $args, true) || $args === []) {
     echo "anylint <шлях> [--json] [--no-todo]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
-    echo "  Наразі: PHP (nikic/php-parser). NyxilumLang - у розробці.\n";
+    echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript.\n";
     exit(0);
 }
 
@@ -44,6 +46,12 @@ $analyzer = (new Analyzer())
     // NX_EXE - шлях до бінарника Nx, якщо він не в PATH під іменем "nx"
     // (типово при локальній збірці з вихідників, а не встановленого CLI).
     ->withProvider(new NyxilumProvider(getenv('NX_EXE') ?: 'nx'))
+    // NODE_EXE - шлях до бінарника Node.js, якщо він не в PATH під іменем
+    // "node". Обидва провайдери шлють файл в один і той самий
+    // tools/js-ast-dump/dump.js (TypeScript compiler API парсить і .js, і
+    // .ts - allowJs лише про перевірку типів, парсер спільний).
+    ->withProvider(new JavaScriptProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new TypeScriptProvider(getenv('NODE_EXE') ?: 'node'))
     ->withRule(new DeadCodeAfterReturnRule())
     ->withRule(new EmptyCatchRule())
     ->withRule(new HardcodedSecretRule())

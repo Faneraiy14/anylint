@@ -30,6 +30,15 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 
+      - name: Set up Node.js (для JavaScriptProvider/TypeScriptProvider)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install JS/TS AST dumper dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: tools/js-ast-dump
+
       - name: Run test suite
         run: php tests/run.php
 

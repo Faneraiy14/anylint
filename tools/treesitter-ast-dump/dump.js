@@ -76,6 +76,66 @@ const LANG_CONFIG = {
     // "for" обслуговує і C-стиль, і foreach, тож лишаємо генеричний 'For'.
     tryStmt: null, catchClause: null, foreach: null, isReturn: isReturnStatement,
   },
+  kotlin: {
+    // Як і в Swift, немає окремого вузла "блок коду" - тіло функції й
+    // тіло if/for/while/try - усюди вузол "statements".
+    wasm: 'tree-sitter-kotlin.wasm', block: 'statements',
+    tryStmt: 'try_expression', catchClause: 'catch_block', foreach: null,
+    // jump_expression - ОДИН тип вузла для return/break/continue/throw,
+    // так само, як control_transfer_statement у Swift; розрізняємо за
+    // текстом першого токена.
+    isReturn: (n) => n.type === 'jump_expression' && n.childCount > 0 && n.child(0).type === 'return',
+  },
+  ruby: {
+    wasm: 'tree-sitter-ruby.wasm',
+    // Ruby не має єдиного вузла "блок коду" - тіло методу це
+    // body_statement, а тіло if/rescue це then. Обидва відіграють роль
+    // Block, тож тут масив (matchesBlock() нижче приймає і рядок, і масив).
+    block: ['body_statement', 'then'],
+    // rescue - Ruby-аналог catch (той самий структурний сенс).
+    tryStmt: 'begin', catchClause: 'rescue', foreach: null,
+    isReturn: (n) => n.type === 'return',
+    // "begin" - ОДНОЧАСНО і вузол TryCatch, і "блок" для try-частини:
+    // стейтменти try-тіла - ПРЯМІ діти begin (немає окремого вкладеного
+    // вузла-блока для try-частини, на відміну від усіх інших мов) -
+    // дивись mapTryCatchChildren() нижче.
+    tryBodyIsFlat: true,
+  },
+  dart: {
+    wasm: 'tree-sitter-dart.wasm', block: 'block',
+    tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: null,
+    isReturn: isReturnStatement,
+    // У Dart тіло catch - НЕ дитина catch_clause, а НАСТУПНИЙ СУСІД
+    // catch_clause під try_statement (try_statement.children =
+    // [block(try), catch_clause, block(catch-тіло)]) - дивись
+    // mapTryCatchChildren() нижче.
+    catchBodyIsSibling: true,
+  },
+  zig: {
+    wasm: 'tree-sitter-zig.wasm', block: 'block',
+    // Zig не має традиційного try/catch-блоку - "catch" там оператор-
+    // вираз для обробки помилки одразу на місці виклику
+    // ("g() catch |err| {...}"), а не окрема пара try-блок/catch-блок,
+    // тож структурно нема аналога (обидва null, як і в C).
+    tryStmt: null, catchClause: null, foreach: null,
+    // "return 1;" у Zig, так само як у Rust, - return_expression,
+    // обгорнутий у expression_statement (return - вираз).
+    isReturn: (n) => n.type === 'return_expression',
+  },
+  objc: {
+    wasm: 'tree-sitter-objc.wasm', block: 'compound_statement',
+    tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: null,
+    isReturn: isReturnStatement,
+  },
+  solidity: {
+    // function_body сам по собі НЕ обгорнутий у block_statement - його
+    // прямі діти вже стейтменти функції, тож він теж має відігравати
+    // роль Block (інакше dead-code-after-return не бачив би мертвий код
+    // одразу на верхньому рівні функції, лише всередині вкладених if/try).
+    wasm: 'tree-sitter-solidity.wasm', block: ['block_statement', 'function_body'],
+    tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: null,
+    isReturn: isReturnStatement,
+  },
 };
 
 const lang = process.argv[2];
@@ -94,6 +154,10 @@ try {
   process.exit(2);
 }
 
+function matchesBlock(type) {
+  return Array.isArray(cfg.block) ? cfg.block.includes(type) : type === cfg.block;
+}
+
 function mapNode(node, isRoot) {
   const line = node.startPosition.row + 1;
   const type = node.type;
@@ -101,7 +165,7 @@ function mapNode(node, isRoot) {
   let canonicalType;
   if (isRoot) {
     canonicalType = 'Root';
-  } else if (type === cfg.block) {
+  } else if (matchesBlock(type)) {
     canonicalType = 'Block';
   } else if (cfg.isReturn(node)) {
     canonicalType = 'Return';
@@ -129,18 +193,21 @@ function mapNode(node, isRoot) {
   let children;
   if (canonicalType === 'CatchClause') {
     // Так само, як CatchClause у JS/TS-дампері: беремо ЛИШЕ дитину-блок
-    // (тіло catch/except), ігноруючи параметр винятку - EmptyCatchRule
-    // читає рівно catch.children[0] як тіло, а порядок дітей
-    // (спершу параметр, потім блок) різний за назвою в кожній мові, тож
-    // шукаємо блок за типом, а не за позицією. Якщо блоку-дитини взагалі
-    // немає (Swift: "catch { }" без жодного стейтменту всередині
-    // ВЗАГАЛІ не породжує вузол "statements" - на відміну від C-подібних
-    // мов, де {} завжди лишається вузлом compound_statement/block навіть
-    // порожнім) - синтезуємо порожній Block, інакше EmptyCatchRule
-    // (яка читає catch.children[0]->children === []) просто не побачить
-    // жодної дитини й мовчки пропустить цей найпоширеніший випадок.
-    const body = findNamedChild(node, (c) => c.type === cfg.block);
+    // (тіло catch/except/rescue), ігноруючи параметр винятку -
+    // EmptyCatchRule читає рівно catch.children[0] як тіло, а порядок
+    // дітей (спершу параметр, потім блок) різний за назвою в кожній мові,
+    // тож шукаємо блок за типом, а не за позицією. Якщо блоку-дитини
+    // взагалі немає (Swift/Kotlin: "catch { }" без жодного стейтменту
+    // всередині ВЗАГАЛІ не породжує вузол statements - на відміну від
+    // C-подібних мов, де {} завжди лишається вузлом compound_statement/
+    // block навіть порожнім) - синтезуємо порожній Block, інакше
+    // EmptyCatchRule (яка читає catch.children[0]->children === [])
+    // просто не побачить жодної дитини й мовчки пропустить цей
+    // найпоширеніший випадок.
+    const body = findNamedChild(node, (c) => matchesBlock(c.type));
     children = [body ? mapNode(body, false) : { type: 'Block', line, attributes: {}, children: [] }];
+  } else if (canonicalType === 'TryCatch' && (cfg.catchBodyIsSibling || cfg.tryBodyIsFlat)) {
+    children = mapTryCatchChildren(node);
   } else {
     children = namedChildren(node).map((c) => mapNode(c, false));
   }
@@ -172,6 +239,63 @@ function unwrapExpressionStatement(node) {
     node = node.namedChild(0);
   }
   return node;
+}
+
+// Обробляє дві мовні особливості, яких немає в жодній із раніше
+// підтриманих мов (C/C++/C#/Java/Python/Rust/Swift/Go), тому генеричного
+// "просто змапи всіх namedChildren" тут недостатньо:
+//
+// - Dart (catchBodyIsSibling): тіло catch - НЕ дитина catch_clause, а
+//   НАСТУПНИЙ СУСІД під тим самим try_statement (children =
+//   [block(try), catch_clause, block(catch)]) - треба вручну спарувати
+//   кожен catch_clause з наступним блоком, інакше EmptyCatchRule
+//   (catch.children[0] як тіло) побачить catch_clause БЕЗ жодної дитини.
+// - Ruby (tryBodyIsFlat): "begin" - ОДНОЧАСНО і сам вузол TryCatch, і
+//   "блок" для try-частини - стейтменти try-тіла ПРЯМІ діти begin,
+//   перемішані з rescue/ensure/else як сусіди, без окремого вкладеного
+//   Block. Синтезуємо цей Block вручну з усіх дітей, крім
+//   rescue/ensure/else (rescue стає CatchClause, ensure/else - НЕ
+//   частина try-тіла, інакше return у try з наступним ensure-кодом
+//   хибно виглядав би як мертвий код після return).
+function mapTryCatchChildren(node) {
+  const raw = namedChildren(node);
+  const result = [];
+
+  if (cfg.tryBodyIsFlat) {
+    const tryBodyLine = node.startPosition.row + 1;
+    const tryBodyStatements = [];
+    for (const child of raw) {
+      if (child.type === cfg.catchClause) {
+        result.push(mapNode(child, false));
+      } else if (child.type === 'ensure' || child.type === 'else') {
+        continue;
+      } else {
+        tryBodyStatements.push(mapNode(child, false));
+      }
+    }
+    return [{ type: 'Block', line: tryBodyLine, attributes: {}, children: tryBodyStatements }, ...result];
+  }
+
+  // cfg.catchBodyIsSibling (Dart)
+  for (let i = 0; i < raw.length; i++) {
+    const child = raw[i];
+    if (child.type === cfg.catchClause) {
+      const next = raw[i + 1];
+      const body = next && matchesBlock(next.type) ? next : null;
+      result.push({
+        type: 'CatchClause',
+        line: child.startPosition.row + 1,
+        attributes: {},
+        children: [body ? mapNode(body, false) : { type: 'Block', line: child.startPosition.row + 1, attributes: {}, children: [] }],
+      });
+      if (body) {
+        i++;
+      }
+    } else {
+      result.push(mapNode(child, false));
+    }
+  }
+  return result;
 }
 
 function findNamedChild(node, predicate) {

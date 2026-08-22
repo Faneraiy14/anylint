@@ -8,15 +8,21 @@ use AnyLint\Analyzer;
 use AnyLint\Providers\CProvider;
 use AnyLint\Providers\CppProvider;
 use AnyLint\Providers\CSharpProvider;
+use AnyLint\Providers\DartProvider;
 use AnyLint\Providers\GoProvider;
 use AnyLint\Providers\JavaProvider;
 use AnyLint\Providers\JavaScriptProvider;
+use AnyLint\Providers\KotlinProvider;
 use AnyLint\Providers\NyxilumProvider;
+use AnyLint\Providers\ObjectiveCProvider;
 use AnyLint\Providers\PhpProvider;
 use AnyLint\Providers\PythonProvider;
+use AnyLint\Providers\RubyProvider;
 use AnyLint\Providers\RustProvider;
+use AnyLint\Providers\SolidityProvider;
 use AnyLint\Providers\SwiftProvider;
 use AnyLint\Providers\TypeScriptProvider;
+use AnyLint\Providers\ZigProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\HardcodedSecretRule;
@@ -372,7 +378,7 @@ if (!$nodeAvailable) {
     }
 }
 
-echo "11. C/C++/C#/Java/Python/Rust/Swift/Go-провайдери (node dump.js, tree-sitter) - ті самі структурні правила без змін коду\n";
+echo "11. tree-sitter-провайдери (C/C++/C#/Java/Python/Rust/Swift/Go/Kotlin/Ruby/Dart/Zig/Objective-C/Solidity) - ті самі структурні правила без змін коду\n";
 $treesitterDump = __DIR__ . '/../tools/treesitter-ast-dump/dump.js';
 $tsProcess = @proc_open([$nodeExe, '-e', "require.resolve('web-tree-sitter', {paths: ['" . dirname($treesitterDump) . "']})"], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $tsPipes);
 $treesitterAvailable = is_resource($tsProcess) && proc_close($tsProcess) === 0;
@@ -452,6 +458,60 @@ if (!$treesitterAvailable) {
             // Go не має try/catch (defer/recover) - структурно нема аналога.
             'catch' => null,
             'clean' => "func f(x int) int {\n    if x > 0 {\n        return 1\n    }\n    return 0\n}\n",
+        ],
+        'Kotlin' => [
+            'ext' => 'kt',
+            'provider' => new KotlinProvider($nodeExe),
+            'dead' => "fun f(x: Int): Int {\n    if (x > 0) {\n        return 1\n        dead()\n    }\n    return 0\n}\n",
+            'catch' => "fun f() {\n    try {\n        g()\n    } catch (e: Exception) {\n    }\n}\n",
+            // break/continue - той самий тип вузла jump_expression, що й
+            // return; перевіряє, що isReturn() у dump.js справді розрізняє
+            // їх за текстом ключового слова, а не хибно ловить усе.
+            'clean' => "fun f(x: Int): Int {\n    for (i in 0..1) {\n        if (i == 1) { break }\n        if (i == 2) { continue }\n    }\n    return 0\n}\n",
+        ],
+        'Ruby' => [
+            'ext' => 'rb',
+            'provider' => new RubyProvider($nodeExe),
+            'dead' => "def f(x)\n  if x\n    return 1\n    dead\n  end\n  return 0\nend\n",
+            'catch' => "def f\n  begin\n    g\n  rescue => e\n  end\nend\n",
+            // ensure-гілка НЕ повинна злитись у той самий "блок", що й
+            // try-тіло (mapTryCatchChildren() у dump.js) - інакше return у
+            // begin з подальшим ensure-кодом хибно виглядав би як мертвий
+            // код одразу після return.
+            'clean' => "def f(x)\n  if x\n    return 1\n  end\n  begin\n    return 1\n  rescue => e\n    handle(e)\n  ensure\n    cleanup\n  end\n  return 0\nend\n",
+        ],
+        'Dart' => [
+            'ext' => 'dart',
+            'provider' => new DartProvider($nodeExe),
+            'dead' => "int f(int x) {\n  if (x > 0) {\n    return 1;\n    dead();\n  }\n  return 0;\n}\n",
+            // Тіло catch у Dart - сусід catch_clause, а не його дитина
+            // (mapTryCatchChildren() у dump.js) - саме цей кейс перевіряє.
+            'catch' => "int f() {\n  try {\n    g();\n  } catch (e) {\n  }\n  return 0;\n}\n",
+            'clean' => "int f(int x) {\n  if (x > 0) {\n    return 1;\n  }\n  return 0;\n}\n",
+        ],
+        'Zig' => [
+            'ext' => 'zig',
+            'provider' => new ZigProvider($nodeExe),
+            // return у Zig, так само як у Rust, - return_expression,
+            // обгорнутий в expression_statement.
+            'dead' => "fn f(x: i32) i32 {\n    if (x > 0) {\n        return 1;\n        dead();\n    }\n    return 0;\n}\n",
+            // Zig не має традиційного try/catch-блоку (catch - вираз-оператор).
+            'catch' => null,
+            'clean' => "fn f(x: i32) i32 {\n    if (x > 0) {\n        return 1;\n    }\n    return 0;\n}\n",
+        ],
+        'Objective-C' => [
+            'ext' => 'm',
+            'provider' => new ObjectiveCProvider($nodeExe),
+            'dead' => "@implementation A\n- (int)f:(int)x {\n    if (x > 0) {\n        return 1;\n        dead();\n    }\n    return 0;\n}\n@end\n",
+            'catch' => "@implementation A\n- (void)f {\n    @try {\n        g();\n    } @catch (NSException *e) {\n    }\n}\n@end\n",
+            'clean' => "@implementation A\n- (int)f:(int)x {\n    if (x > 0) {\n        return 1;\n    }\n    return 0;\n}\n@end\n",
+        ],
+        'Solidity' => [
+            'ext' => 'sol',
+            'provider' => new SolidityProvider($nodeExe),
+            'dead' => "contract A {\n  function f(uint x) public returns (uint) {\n    if (x > 0) {\n      return 1;\n      dead();\n    }\n    return 0;\n  }\n}\n",
+            'catch' => "contract A {\n  function f() public {\n    try foo.bar() {\n    } catch {\n    }\n  }\n}\n",
+            'clean' => "contract A {\n  function f(uint x) public returns (uint) {\n    if (x > 0) {\n      return 1;\n    }\n    return 0;\n  }\n}\n",
         ],
     ];
 

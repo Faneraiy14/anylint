@@ -10,15 +10,21 @@ use AnyLint\Finding;
 use AnyLint\Providers\CProvider;
 use AnyLint\Providers\CppProvider;
 use AnyLint\Providers\CSharpProvider;
+use AnyLint\Providers\DartProvider;
 use AnyLint\Providers\GoProvider;
 use AnyLint\Providers\JavaProvider;
 use AnyLint\Providers\JavaScriptProvider;
+use AnyLint\Providers\KotlinProvider;
 use AnyLint\Providers\NyxilumProvider;
+use AnyLint\Providers\ObjectiveCProvider;
 use AnyLint\Providers\PhpProvider;
 use AnyLint\Providers\PythonProvider;
+use AnyLint\Providers\RubyProvider;
 use AnyLint\Providers\RustProvider;
+use AnyLint\Providers\SolidityProvider;
 use AnyLint\Providers\SwiftProvider;
 use AnyLint\Providers\TypeScriptProvider;
+use AnyLint\Providers\ZigProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\HardcodedSecretRule;
@@ -31,7 +37,8 @@ $args = array_slice($argv, 1);
 if (in_array('--help', $args, true) || $args === []) {
     echo "anylint <шлях> [--json] [--no-todo]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
-    echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go.\n";
+    echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go,\n";
+    echo "        Kotlin, Ruby, Dart, Zig, Objective-C, Solidity.\n";
     exit(0);
 }
 
@@ -71,6 +78,12 @@ $analyzer = (new Analyzer())
     ->withProvider(new RustProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new SwiftProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new GoProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new KotlinProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new RubyProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new DartProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new ZigProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new ObjectiveCProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new SolidityProvider(getenv('NODE_EXE') ?: 'node'))
     ->withRule(new DeadCodeAfterReturnRule())
     ->withRule(new EmptyCatchRule())
     ->withRule(new HardcodedSecretRule())

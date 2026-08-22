@@ -10,10 +10,14 @@ use AnyLint\Finding;
 use AnyLint\Providers\CProvider;
 use AnyLint\Providers\CppProvider;
 use AnyLint\Providers\CSharpProvider;
+use AnyLint\Providers\GoProvider;
 use AnyLint\Providers\JavaProvider;
 use AnyLint\Providers\JavaScriptProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
+use AnyLint\Providers\PythonProvider;
+use AnyLint\Providers\RustProvider;
+use AnyLint\Providers\SwiftProvider;
 use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\EmptyCatchRule;
@@ -27,7 +31,7 @@ $args = array_slice($argv, 1);
 if (in_array('--help', $args, true) || $args === []) {
     echo "anylint <шлях> [--json] [--no-todo]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
-    echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java.\n";
+    echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go.\n";
     exit(0);
 }
 
@@ -63,6 +67,10 @@ $analyzer = (new Analyzer())
     ->withProvider(new CppProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new CSharpProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new JavaProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new PythonProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new RustProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new SwiftProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new GoProvider(getenv('NODE_EXE') ?: 'node'))
     ->withRule(new DeadCodeAfterReturnRule())
     ->withRule(new EmptyCatchRule())
     ->withRule(new HardcodedSecretRule())

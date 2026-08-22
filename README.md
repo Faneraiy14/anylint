@@ -4,7 +4,7 @@
 
 ## Чому це не черговий PHP-лінтер
 
-Це доведено, не лише задекларовано: `NyxilumProvider` підключає [NyxilumLang](https://github.com/Faneraiy14/NyxilumLang) — зовсім іншу мову з власним лексером/парсером/VM, `JavaScriptProvider`/`TypeScriptProvider` шлють файл через TypeScript compiler API, а `CProvider`/`CppProvider`/`CSharpProvider`/`JavaProvider` — через tree-sitter. Структурні правила ловлять ті самі класи багів у `.nx`, `.js`, `.ts`, `.c`, `.cpp`, `.cs` і `.java`, що й у `.php`, **без жодної зміни коду правил**.
+Це доведено, не лише задекларовано: `NyxilumProvider` підключає [NyxilumLang](https://github.com/Faneraiy14/NyxilumLang) — зовсім іншу мову з власним лексером/парсером/VM, `JavaScriptProvider`/`TypeScriptProvider` шлють файл через TypeScript compiler API, а `CProvider`/`CppProvider`/`CSharpProvider`/`JavaProvider`/`PythonProvider`/`RustProvider`/`SwiftProvider`/`GoProvider` — через tree-sitter. Структурні правила ловлять ті самі класи багів у `.nx`, `.js`, `.ts`, `.c`, `.cpp`, `.cs`, `.java`, `.py`, `.rs`, `.swift` і `.go`, що й у `.php`, **без жодної зміни коду правил**.
 
 Правила діляться на три роди — і всі мають ОДИН і той самий інтерфейс `Rule`:
 
@@ -20,9 +20,17 @@
 
 Той самий трюк, що й з `nx ast`, тільки виконавчий інструмент — власний `tools/js-ast-dump/dump.js`: TypeScript compiler API (пакет `typescript`, парсить і `.js`, і `.ts` — `allowJs` там лише про перевірку типів, парсер спільний) обходить `ts.Node`-дерево і вже сам віддає ту саму канонічну JSON-схему. `.js`/`.jsx`/`.mjs`/`.cjs` і `.ts`/`.tsx` — це два окремі класи-провайдери (один плагін = одна мова), але обидва діляться спільною логікою запуску процесу через `AbstractJsFamilyProvider`. Потребує `node` у `PATH` (або `NODE_EXE=...`) і встановлених залежностей у `tools/js-ast-dump` (`npm install` там один раз) — без цього `.js`/`.ts`-файли так само отримують `parse-error` Finding, а не мовчазний збій усього прогону.
 
-### Як працюють `CProvider`/`CppProvider`/`CSharpProvider`/`JavaProvider`
+### Як працюють `CProvider`/`CppProvider`/`CSharpProvider`/`JavaProvider`/`PythonProvider`/`RustProvider`/`SwiftProvider`/`GoProvider`
 
-Для родини C-подібних мов немає одного спільного офіційного compiler API (на відміну від TypeScript для JS/TS), тож тут — [tree-sitter](https://tree-sitter.github.io/) через `web-tree-sitter` (WASM-рантайм, БЕЗ нативної компіляції) і прекомпільовані `.wasm`-граматики з пакета `tree-sitter-wasms`. `tools/treesitter-ast-dump/dump.js` бере мову ПЕРШИМ аргументом (`c`/`cpp`/`c_sharp`/`java`) і сам обирає потрібну граматику — той самий процес, що й для JS/TS, лише один движок обслуговує чотири мови одразу. Кожна tree-sitter-граматика називає свій "блок коду" по-своєму (`compound_statement` у C/C++, `block` у C#/Java) — ця відповідність зафіксована в `LANG_CONFIG` усередині dump.js, а не вгадується налету. Потребує `node` у `PATH` і `npm install` у `tools/treesitter-ast-dump` — так само, як і для JS/TS-дампера.
+Немає одного спільного офіційного compiler API для всіх цих мов (на відміну від TypeScript для JS/TS), тож тут — [tree-sitter](https://tree-sitter.github.io/) через `web-tree-sitter` (WASM-рантайм, БЕЗ нативної компіляції) і прекомпільовані `.wasm`-граматики з пакета `tree-sitter-wasms`. `tools/treesitter-ast-dump/dump.js` бере мову ПЕРШИМ аргументом (`c`/`cpp`/`c_sharp`/`java`/`python`/`rust`/`swift`/`go`) і сам обирає потрібну граматику — той самий процес, що й для JS/TS, лише один движок обслуговує вісім мов одразу.
+
+Кожна tree-sitter-граматика називає свій "блок коду" й "return" по-своєму — ця відповідність зафіксована в `LANG_CONFIG` усередині dump.js, а не вгадується налету:
+
+- **"Блок коду"**: `compound_statement` у C/C++, `block` у C#/Java/Python/Rust/Go, `statements` у Swift (там немає окремого вузла "блок" — тіло функції й тіло `if`/`do`/`for`/`while` це один і той самий тип вузла).
+- **`return`**: у Rust це `return_expression`, обгорнутий у `expression_statement` (return — вираз, не стейтмент) — без окремого розгортання (`unwrapExpressionStatement()` у dump.js) він був би не прямою дитиною блоку, а онуком, і `dead-code-after-return` (яка дивиться лише на прямих дітей `Block`) ніколи б його не побачила. У Swift `return`/`break`/`continue`/`throw` — це ОДИН тип вузла `control_transfer_statement`; розрізняються лише за текстом першого токена, тож `isReturn()` у dump.js звіряє саме його, а не сам тип вузла.
+- **`catch`/`except`**: Python називає це `except`, не `catch`, семантика та сама. Rust і Go не мають механізму винятків (Result/panic і defer/recover відповідно) — там `tryStmt`/`catchClause` просто `null`, і жодних TryCatch/CatchClause-вузлів не з'являється.
+
+Потребує `node` у `PATH` і `npm install` у `tools/treesitter-ast-dump` — так само, як і для JS/TS-дампера.
 
 ## Встановлення й запуск
 
@@ -65,9 +73,10 @@ src/
   Providers/AbstractJsFamilyProvider.php — спільний запуск tools/js-ast-dump/dump.js -> канонічне дерево
   Providers/JavaScriptProvider.php, TypeScriptProvider.php — розширення файлів для AbstractJsFamilyProvider
   Providers/AbstractTreeSitterProvider.php — спільний запуск tools/treesitter-ast-dump/dump.js -> канонічне дерево
-  Providers/CProvider.php, CppProvider.php, CSharpProvider.php, JavaProvider.php — розширення файлів + мова tree-sitter для AbstractTreeSitterProvider
+  Providers/CProvider.php, CppProvider.php, CSharpProvider.php, JavaProvider.php,
+    PythonProvider.php, RustProvider.php, SwiftProvider.php, GoProvider.php — розширення файлів + мова tree-sitter для AbstractTreeSitterProvider
 tools/js-ast-dump/dump.js          — TypeScript compiler API -> та сама канонічна JSON-схема, що й "nx ast"
-tools/treesitter-ast-dump/dump.js  — tree-sitter (C/C++/C#/Java) -> та сама канонічна JSON-схема
+tools/treesitter-ast-dump/dump.js  — tree-sitter (C/C++/C#/Java/Python/Rust/Swift/Go) -> та сама канонічна JSON-схема
   Rules/*                — самі правила
   Analyzer.php            — обхід файлів, вибір провайдера, запуск правил
 bin/anylint                — CLI

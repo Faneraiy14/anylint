@@ -8,10 +8,14 @@ use AnyLint\Analyzer;
 use AnyLint\Providers\CProvider;
 use AnyLint\Providers\CppProvider;
 use AnyLint\Providers\CSharpProvider;
+use AnyLint\Providers\GoProvider;
 use AnyLint\Providers\JavaProvider;
 use AnyLint\Providers\JavaScriptProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
+use AnyLint\Providers\PythonProvider;
+use AnyLint\Providers\RustProvider;
+use AnyLint\Providers\SwiftProvider;
 use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\EmptyCatchRule;
@@ -368,7 +372,7 @@ if (!$nodeAvailable) {
     }
 }
 
-echo "11. C/C++/C#/Java-провайдери (node dump.js, tree-sitter) - ті самі структурні правила без змін коду\n";
+echo "11. C/C++/C#/Java/Python/Rust/Swift/Go-провайдери (node dump.js, tree-sitter) - ті самі структурні правила без змін коду\n";
 $treesitterDump = __DIR__ . '/../tools/treesitter-ast-dump/dump.js';
 $tsProcess = @proc_open([$nodeExe, '-e', "require.resolve('web-tree-sitter', {paths: ['" . dirname($treesitterDump) . "']})"], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $tsPipes);
 $treesitterAvailable = is_resource($tsProcess) && proc_close($tsProcess) === 0;
@@ -410,6 +414,44 @@ if (!$treesitterAvailable) {
             'dead' => "class A {\n  int f() {\n    for (int i = 0; i < 1; i++) {\n      return 1;\n      dead();\n    }\n    return 0;\n  }\n}\n",
             'catch' => "class A {\n  int f() {\n    try {\n      g();\n    } catch (Exception e) {\n    }\n    return 0;\n  }\n}\n",
             'clean' => "class A {\n  int f() {\n    for (int i = 0; i < 1; i++) {\n      return 1;\n    }\n    return 0;\n  }\n}\n",
+        ],
+        'Python' => [
+            'ext' => 'py',
+            'provider' => new PythonProvider($nodeExe),
+            'dead' => "def f(x):\n    if x:\n        return 1\n        dead()\n    return 0\n",
+            // Порожній except у Python - синтаксична помилка (потрібен хоча б
+            // "pass"), тож немає сенсу перевіряти empty-catch тут - на
+            // відміну від C-подібних мов, {} завжди валідний.
+            'catch' => null,
+            'clean' => "def f(x):\n    if x:\n        return 1\n    return 0\n",
+        ],
+        'Rust' => [
+            'ext' => 'rs',
+            'provider' => new RustProvider($nodeExe),
+            // return у Rust - вираз, обгорнутий в expression_statement;
+            // саме цей кейс перевіряє unwrapExpressionStatement() у dump.js.
+            'dead' => "fn f(x: i32) -> i32 {\n    if x > 0 {\n        return 1;\n        dead();\n    }\n    0\n}\n",
+            // Rust не має try/catch (Result/panic) - структурно нема аналога.
+            'catch' => null,
+            'clean' => "fn f(x: i32) -> i32 {\n    if x > 0 {\n        return 1;\n    }\n    0\n}\n",
+        ],
+        'Swift' => [
+            'ext' => 'swift',
+            'provider' => new SwiftProvider($nodeExe),
+            'dead' => "func f(x: Int) -> Int {\n    if x > 0 {\n        return 1\n        dead()\n    }\n    return 0\n}\n",
+            'catch' => "func f() {\n    do {\n        try g()\n    } catch {\n    }\n}\n",
+            // break/continue - той самий тип вузла control_transfer_statement,
+            // що й return; перевіряє, що isReturn() у dump.js справді
+            // розрізняє їх за текстом ключового слова, а не хибно ловить усе.
+            'clean' => "func f(x: Int) -> Int {\n    for i in 0..<3 {\n        if i == 1 { break }\n        if i == 2 { continue }\n    }\n    return 0\n}\n",
+        ],
+        'Go' => [
+            'ext' => 'go',
+            'provider' => new GoProvider($nodeExe),
+            'dead' => "func f(x int) int {\n    if x > 0 {\n        return 1\n        dead()\n    }\n    return 0\n}\n",
+            // Go не має try/catch (defer/recover) - структурно нема аналога.
+            'catch' => null,
+            'clean' => "func f(x int) int {\n    if x > 0 {\n        return 1\n    }\n    return 0\n}\n",
         ],
     ];
 

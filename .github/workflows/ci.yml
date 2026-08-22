@@ -33,6 +33,9 @@ jobs:
       - name: Run test suite
         run: php tests/run.php
 
+      - name: PHPStan (level max)
+        run: vendor/bin/phpstan analyse --no-progress
+
       - name: Self-analysis (dogfooding)
         run: php bin/anylint src --json
 

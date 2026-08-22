@@ -79,13 +79,13 @@ final class PhpProvider implements LanguageProvider
                 [],
                 [
                     $this->convertStmts($stmt->stmts),
-                    ...array_map(fn (Stmt\Catch_ $c) => new Node(
+                    ...array_values(array_map(fn (Stmt\Catch_ $c) => new Node(
                         'CatchClause',
                         $c->getLine(),
                         [],
                         [$this->convertStmts($c->stmts)],
                         $c,
-                    ), $stmt->catches),
+                    ), $stmt->catches)),
                 ],
             ),
             $stmt instanceof Stmt\If_ => new Node(
@@ -95,7 +95,7 @@ final class PhpProvider implements LanguageProvider
                 [
                     $this->convertStmts($stmt->stmts),
                     ...($stmt->else !== null ? [$this->convertStmts($stmt->else->stmts)] : []),
-                    ...array_map(fn (Stmt\ElseIf_ $ei) => $this->convertStmts($ei->stmts), $stmt->elseifs),
+                    ...array_values(array_map(fn (Stmt\ElseIf_ $ei) => $this->convertStmts($ei->stmts), $stmt->elseifs)),
                 ],
             ),
             $stmt instanceof Stmt\While_ => new Node('While', $line, [], [$this->convertStmts($stmt->stmts)]),
@@ -139,17 +139,29 @@ final class PhpProvider implements LanguageProvider
      * замикання на своєму рівні; повторний виклик тут спричинив би
      * дублювання знахідок (і зайву роботу) для кожного рівня вкладеності.
      *
-     * @return Node[]
+     * @return list<Node>
      */
     private function findNestedClosures(PhpNode $expr): array
     {
-        $closures = (new NodeFinder())->find($expr, fn (PhpNode $n) => $n instanceof Expr\Closure);
-        return array_map(fn (Expr\Closure $c) => new Node(
-            'FunctionDecl',
-            $c->getLine(),
-            ['name' => '{closure}'],
-            [$this->convertStmts($c->stmts)],
-            $c,
-        ), $closures);
+        $found = (new NodeFinder())->find($expr, fn (PhpNode $n): bool => $n instanceof Expr\Closure);
+
+        $closures = [];
+        foreach ($found as $node) {
+            // NodeFinder::find() повертає PhpNode[] навіть з фільтром-
+            // предикатом - сам предикат PHPStan не звужує тип елементів,
+            // тож instanceof тут потрібен саме для типів, а не лише як
+            // "про всяк випадок" (усі елементи $found і так - Closure).
+            if (!$node instanceof Expr\Closure) {
+                continue;
+            }
+            $closures[] = new Node(
+                'FunctionDecl',
+                $node->getLine(),
+                ['name' => '{closure}'],
+                [$this->convertStmts($node->stmts)],
+                $node,
+            );
+        }
+        return $closures;
     }
 }

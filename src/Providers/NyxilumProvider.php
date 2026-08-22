@@ -66,18 +66,54 @@ final class NyxilumProvider implements LanguageProvider
         return $this->toNode($decoded);
     }
 
-    /** @param array<string,mixed> $data */
+    /**
+     * Явна перевірка форми замість сліпих (string)/(int)-кастів mixed -
+     * json_decode() із $stdout зовнішнього процесу це недовірені дані:
+     * якщо колись "nx ast" видасть щось несподіване (регресія в
+     * AstJsonDumper.cs, обірваний вивід), краще зрозуміла помилка тут,
+     * ніж мовчазне (string)null -> "" чи (int)"abc" -> 0 десь глибше в
+     * дереві.
+     *
+     * @param array<mixed> $data
+     */
     private function toNode(array $data): Node
     {
-        $children = [];
-        foreach ((array) ($data['children'] ?? []) as $child) {
-            $children[] = $this->toNode($child);
+        $type = $data['type'] ?? null;
+        if (!is_string($type)) {
+            throw new \RuntimeException("Вузол AST від 'nx ast' без рядкового поля 'type': " . json_encode($data));
         }
-        return new Node(
-            (string) $data['type'],
-            (int) $data['line'],
-            (array) ($data['attributes'] ?? []),
-            $children,
-        );
+
+        $line = $data['line'] ?? null;
+        if (!is_int($line)) {
+            throw new \RuntimeException("Вузол '{$type}' від 'nx ast' без цілого поля 'line'.");
+        }
+
+        $attributesRaw = $data['attributes'] ?? [];
+        $attributes = is_array($attributesRaw) ? $this->toStringKeyedArray($attributesRaw) : [];
+
+        $children = [];
+        $childrenRaw = $data['children'] ?? [];
+        if (is_array($childrenRaw)) {
+            foreach ($childrenRaw as $child) {
+                if (is_array($child)) {
+                    $children[] = $this->toNode($child);
+                }
+            }
+        }
+
+        return new Node($type, $line, $attributes, $children);
+    }
+
+    /**
+     * @param array<mixed> $raw
+     * @return array<string, mixed>
+     */
+    private function toStringKeyedArray(array $raw): array
+    {
+        $result = [];
+        foreach ($raw as $key => $value) {
+            $result[(string) $key] = $value;
+        }
+        return $result;
     }
 }

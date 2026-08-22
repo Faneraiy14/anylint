@@ -40,11 +40,11 @@ final class Analyzer
         }
 
         $findings = [];
+        /** @var iterable<\SplFileInfo> $iterator */
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
         );
         foreach ($iterator as $fileInfo) {
-            /** @var \SplFileInfo $fileInfo */
             foreach (self::SKIP_DIRS as $skip) {
                 if (str_contains($fileInfo->getPathname(), DIRECTORY_SEPARATOR . $skip . DIRECTORY_SEPARATOR)) {
                     continue 2;

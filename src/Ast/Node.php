@@ -21,7 +21,7 @@ final class Node
 {
     /**
      * @param array<string,mixed> $attributes
-     * @param Node[] $children
+     * @param list<Node> $children
      */
     public function __construct(
         public readonly string $type,
@@ -32,7 +32,7 @@ final class Node
     ) {
     }
 
-    /** @return Node[] */
+    /** @return list<Node> */
     public function findAll(string $type): array
     {
         $found = [];

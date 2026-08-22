@@ -50,7 +50,10 @@ final class UnusedVariableRule implements Rule
         return $findings;
     }
 
-    /** @param Stmt[] $stmts */
+    /**
+     * @param Stmt[] $stmts
+     * @return list<Finding>
+     */
     private function checkFunctionBody(array $stmts, string $filePath): array
     {
         $finder = new NodeFinder();
@@ -60,6 +63,15 @@ final class UnusedVariableRule implements Rule
 
         $countByName = [];
         foreach ($allVars as $v) {
+            // $finder-фільтр вище вже перевіряв is_string($n->name), але
+            // PHPStan не проносить цю перевірку через замикання в тип
+            // елементів $allVars (Expr\Variable::$name задекларовано як
+            // Expr|string - для "змінних змінних" $$foo). Тому перевірка
+            // тут - не дублювання, а єдине місце, де PHPStan справді бачить
+            // звуження до string.
+            if (!is_string($v->name)) {
+                continue;
+            }
             $countByName[$v->name] = ($countByName[$v->name] ?? 0) + 1;
         }
 

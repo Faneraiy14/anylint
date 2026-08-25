@@ -24,7 +24,11 @@ final class HardcodedSecretRule implements Rule
         'GitHub Token' => '/\bghp_[A-Za-z0-9]{36}\b/',
         'AWS Access Key' => '/\bAKIA[0-9A-Z]{16}\b/',
         'Private Key Block' => '/-----BEGIN [A-Z ]*PRIVATE KEY-----/',
-        'Generic Secret Assignment' => '/\b(password|secret|api[_-]?key)\b\s*[=:]\s*["\']([^"\']{8,})["\']/i',
+        // ["\']?...[:=]>?: ключ також може бути в лапках (PHP-масив/JSON:
+        // 'password' => '...', "password": "...") і/або присвоюватись через
+        // стрілку PHP-масиву "=>", не лише "=" чи ":" — той самий фікс, що
+        // й у сестринському secretscan (SecretScanner.php).
+        'Generic Secret Assignment' => '/\b(password|secret|api[_-]?key)\b["\']?\s*[=:]>?\s*["\']([^"\']{8,})["\']/i',
     ];
 
     public function name(): string

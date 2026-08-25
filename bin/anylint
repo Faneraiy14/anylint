@@ -119,16 +119,12 @@ if ($json) {
     exit($findings === [] ? 0 : 1);
 }
 
-$hasError = false;
 foreach ($findings as $finding) {
     $icon = match ($finding->severity) {
         Severity::Error => '❌',
         Severity::Warning => '⚠️ ',
         Severity::Info => 'ℹ️ ',
     };
-    if ($finding->severity === Severity::Error) {
-        $hasError = true;
-    }
     echo "{$icon} {$finding->file}:{$finding->line} [{$finding->rule}] {$finding->message}\n";
 }
 
@@ -138,4 +134,10 @@ if ($findings === []) {
 }
 
 echo "\nЗнайдено: " . count($findings) . "\n";
-exit($hasError ? 1 : 0);
+// Exit 1 для БУДЬ-якої знахідки (Warning чи Error) — узгоджено з --json,
+// де exit-код теж означає лише "findings !== []", без розрізнення severity.
+// Раніше текстовий режим виходив 0 для суто Warning-знахідок (напр.
+// empty-catch/dead-code-after-return/unused-variable) - CI-скрипт, що
+// перевіряє $? після "php bin/anylint src" (саме так, як показано в
+// README), пропускав реальні знахідки.
+exit(1);

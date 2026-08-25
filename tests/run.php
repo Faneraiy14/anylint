@@ -137,6 +137,15 @@ $secrets = array_filter($findings, fn ($x) => $x->rule === 'hardcoded-secret');
 check('звичайний рядок — жодної хибної знахідки', count($secrets) === 0);
 rrmdir(dirname($f));
 
+// PHP-масив/JSON-стиль: ключ у лапках і присвоєння через "=>", а не
+// голе "password =" — раніше regex вимагав слово одразу перед "="/":",
+// тож пропускав саме такий поширений запис.
+$f = tempPhpFile("\$config = ['password' => 'RealSecretValue123456'];");
+$findings = newAnalyzer()->analyzePath($f);
+$secrets = array_filter($findings, fn ($x) => $x->rule === 'hardcoded-secret');
+check('PHP-масив \'password\' => \'...\' знайдено', count($secrets) === 1);
+rrmdir(dirname($f));
+
 // --- Тест 5: todo-tracker — лише всередині коментарів ---
 echo "5. TodoTrackerRule (лише в коментарях, не в ідентифікаторах/рядках)\n";
 $f = tempPhpFile("// TODO: зробити пізніше\nfunction f() {}");

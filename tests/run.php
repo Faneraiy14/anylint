@@ -577,6 +577,8 @@ if (!$treesitterAvailable) {
             'provider' => new CProvider($nodeExe),
             'dead' => "int f() {\n  if (1) {\n    return 1;\n    dead();\n  }\n  return 0;\n}\n",
             'catch' => null,
+            'emptyFunc' => "void f() {\n}\n",
+            'longFunc' => "void f() {\n" . str_repeat("  g();\n", 31) . "}\n",
             'clean' => "int f() {\n  if (1) {\n    return 1;\n  }\n  return 0;\n}\n",
         ],
         'C++' => [
@@ -584,6 +586,7 @@ if (!$treesitterAvailable) {
             'provider' => new CppProvider($nodeExe),
             'dead' => "int f() {\n  while (1) {\n    return 1;\n    dead();\n  }\n}\n",
             'catch' => "int f() {\n  try {\n    g();\n  } catch (int e) {\n  }\n  return 0;\n}\n",
+            'emptyFunc' => "void f() {\n}\n",
             'clean' => "int f() {\n  while (1) {\n    return 1;\n  }\n}\n",
         ],
         'C#' => [
@@ -591,6 +594,12 @@ if (!$treesitterAvailable) {
             'provider' => new CSharpProvider($nodeExe),
             'dead' => "class A {\n  int F() {\n    if (x) {\n      return 1;\n      Dead();\n    }\n    return 0;\n  }\n}\n",
             'catch' => "class A {\n  int F() {\n    try {\n      G();\n    } catch (Exception e) {\n    }\n    return 0;\n  }\n}\n",
+            'emptyFunc' => "class A {\n  void F() {\n  }\n}\n",
+            // interface-метод БЕЗ тіла взагалі - той самий тип вузла
+            // method_declaration, що й реалізований метод. Перевіряє, що
+            // funcBodyIsImplicit/'{' у тексті в dump.js справді розрізняє
+            // "тіла нема" від "тіло є, воно порожнє" (лише друге - знахідка).
+            'noFalsePositive' => "interface I {\n  void F();\n}\n",
             'clean' => "class A {\n  int F() {\n    if (x) {\n      return 1;\n    }\n    return 0;\n  }\n}\n",
         ],
         'Java' => [
@@ -598,6 +607,9 @@ if (!$treesitterAvailable) {
             'provider' => new JavaProvider($nodeExe),
             'dead' => "class A {\n  int f() {\n    for (int i = 0; i < 1; i++) {\n      return 1;\n      dead();\n    }\n    return 0;\n  }\n}\n",
             'catch' => "class A {\n  int f() {\n    try {\n      g();\n    } catch (Exception e) {\n    }\n    return 0;\n  }\n}\n",
+            'emptyFunc' => "class A {\n  void f() {\n  }\n}\n",
+            'noFalsePositive' => "interface I {\n  void f();\n}\n",
+            'longFunc' => "class A {\n  void f() {\n" . str_repeat("    g();\n", 31) . "  }\n}\n",
             'clean' => "class A {\n  int f() {\n    for (int i = 0; i < 1; i++) {\n      return 1;\n    }\n    return 0;\n  }\n}\n",
         ],
         'Python' => [
@@ -608,6 +620,13 @@ if (!$treesitterAvailable) {
             // "pass"), тож немає сенсу перевіряти empty-catch тут - на
             // відміну від C-подібних мов, {} завжди валідний.
             'catch' => null,
+            // empty-function НЕ тестуємо для Python: "pass" - ЄДИНИЙ
+            // синтаксично валідний спосіб написати порожнє тіло функції в
+            // Python, і це РЕАЛЬНИЙ стейтмент в AST (pass_statement), не
+            // просто відсутність коду - тобто body.children НІКОЛИ не буде
+            // [] для валідного Python, empty-function структурно не може
+            // спрацювати тут узагалі (і не повинен - pass це ідіоматичний
+            // "навмисно нічого", той самий принцип, що й коментар).
             'clean' => "def f(x):\n    if x:\n        return 1\n    return 0\n",
         ],
         'Rust' => [
@@ -618,6 +637,7 @@ if (!$treesitterAvailable) {
             'dead' => "fn f(x: i32) -> i32 {\n    if x > 0 {\n        return 1;\n        dead();\n    }\n    0\n}\n",
             // Rust не має try/catch (Result/panic) - структурно нема аналога.
             'catch' => null,
+            'emptyFunc' => "fn f() {\n}\n",
             'clean' => "fn f(x: i32) -> i32 {\n    if x > 0 {\n        return 1;\n    }\n    0\n}\n",
         ],
         'Swift' => [
@@ -625,6 +645,7 @@ if (!$treesitterAvailable) {
             'provider' => new SwiftProvider($nodeExe),
             'dead' => "func f(x: Int) -> Int {\n    if x > 0 {\n        return 1\n        dead()\n    }\n    return 0\n}\n",
             'catch' => "func f() {\n    do {\n        try g()\n    } catch {\n    }\n}\n",
+            'emptyFunc' => "func f() {\n}\n",
             // break/continue - той самий тип вузла control_transfer_statement,
             // що й return; перевіряє, що isReturn() у dump.js справді
             // розрізняє їх за текстом ключового слова, а не хибно ловить усе.
@@ -636,6 +657,7 @@ if (!$treesitterAvailable) {
             'dead' => "func f(x int) int {\n    if x > 0 {\n        return 1\n        dead()\n    }\n    return 0\n}\n",
             // Go не має try/catch (defer/recover) - структурно нема аналога.
             'catch' => null,
+            'emptyFunc' => "func f() {\n}\n",
             'clean' => "func f(x int) int {\n    if x > 0 {\n        return 1\n    }\n    return 0\n}\n",
         ],
         'Kotlin' => [
@@ -643,6 +665,7 @@ if (!$treesitterAvailable) {
             'provider' => new KotlinProvider($nodeExe),
             'dead' => "fun f(x: Int): Int {\n    if (x > 0) {\n        return 1\n        dead()\n    }\n    return 0\n}\n",
             'catch' => "fun f() {\n    try {\n        g()\n    } catch (e: Exception) {\n    }\n}\n",
+            'emptyFunc' => "fun f() {\n}\n",
             // break/continue - той самий тип вузла jump_expression, що й
             // return; перевіряє, що isReturn() у dump.js справді розрізняє
             // їх за текстом ключового слова, а не хибно ловить усе.
@@ -653,6 +676,7 @@ if (!$treesitterAvailable) {
             'provider' => new RubyProvider($nodeExe),
             'dead' => "def f(x)\n  if x\n    return 1\n    dead\n  end\n  return 0\nend\n",
             'catch' => "def f\n  begin\n    g\n  rescue => e\n  end\nend\n",
+            'emptyFunc' => "def f\nend\n",
             // ensure-гілка НЕ повинна злитись у той самий "блок", що й
             // try-тіло (mapTryCatchChildren() у dump.js) - інакше return у
             // begin з подальшим ensure-кодом хибно виглядав би як мертвий
@@ -676,6 +700,7 @@ if (!$treesitterAvailable) {
             'dead' => "fn f(x: i32) i32 {\n    if (x > 0) {\n        return 1;\n        dead();\n    }\n    return 0;\n}\n",
             // Zig не має традиційного try/catch-блоку (catch - вираз-оператор).
             'catch' => null,
+            'emptyFunc' => "fn f() void {\n}\n",
             'clean' => "fn f(x: i32) i32 {\n    if (x > 0) {\n        return 1;\n    }\n    return 0;\n}\n",
         ],
         'Objective-C' => [
@@ -690,6 +715,7 @@ if (!$treesitterAvailable) {
             'provider' => new SolidityProvider($nodeExe),
             'dead' => "contract A {\n  function f(uint x) public returns (uint) {\n    if (x > 0) {\n      return 1;\n      dead();\n    }\n    return 0;\n  }\n}\n",
             'catch' => "contract A {\n  function f() public {\n    try foo.bar() {\n    } catch {\n    }\n  }\n}\n",
+            'emptyFunc' => "contract A {\n  function f() public {\n  }\n}\n",
             'clean' => "contract A {\n  function f(uint x) public returns (uint) {\n    if (x > 0) {\n      return 1;\n    }\n    return 0;\n  }\n}\n",
         ],
     ];
@@ -698,7 +724,9 @@ if (!$treesitterAvailable) {
         $analyzer = (new Analyzer())
             ->withProvider($case['provider'])
             ->withRule(new DeadCodeAfterReturnRule())
-            ->withRule(new EmptyCatchRule());
+            ->withRule(new EmptyCatchRule())
+            ->withRule(new EmptyFunctionRule())
+            ->withRule(new LongFunctionRule());
 
         $f = tempJsFile($case['ext'], $case['dead']);
         $findings = $analyzer->analyzePath($f);
@@ -711,6 +739,30 @@ if (!$treesitterAvailable) {
             $findings = $analyzer->analyzePath($f);
             $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
             check("empty-catch ловить {$langName}", count($empty) === 1);
+            rrmdir(dirname($f));
+        }
+
+        if (($case['emptyFunc'] ?? null) !== null) {
+            $f = tempJsFile($case['ext'], $case['emptyFunc']);
+            $findings = $analyzer->analyzePath($f);
+            $emptyFunc = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+            check("empty-function ловить {$langName}", count($emptyFunc) === 1);
+            rrmdir(dirname($f));
+        }
+
+        if (($case['noFalsePositive'] ?? null) !== null) {
+            $f = tempJsFile($case['ext'], $case['noFalsePositive']);
+            $findings = $analyzer->analyzePath($f);
+            $emptyFunc = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+            check("empty-function НЕ ловить метод без тіла в {$langName} (не плутає з порожнім тілом)", count($emptyFunc) === 0);
+            rrmdir(dirname($f));
+        }
+
+        if (($case['longFunc'] ?? null) !== null) {
+            $f = tempJsFile($case['ext'], $case['longFunc']);
+            $findings = $analyzer->analyzePath($f);
+            $long = array_filter($findings, fn ($x) => $x->rule === 'long-function');
+            check("long-function ловить {$langName}", count($long) === 1);
             rrmdir(dirname($f));
         }
 

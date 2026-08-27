@@ -25,18 +25,26 @@ const LANG_CONFIG = {
   c: {
     wasm: 'tree-sitter-c.wasm', block: 'compound_statement',
     tryStmt: null, catchClause: null, foreach: null, isReturn: isReturnStatement,
+    // Ім'я в C/C++ НЕ окреме поле function_definition - воно на кілька
+    // рівнів глибше у declarator (function_declarator.declarator, і
+    // ще глибше для вказівників типу "int *f()") - findFunctionName()
+    // нижче рекурсивно йде по полю "declarator", поки не знайде "name".
+    func: ['function_definition'],
   },
   cpp: {
     wasm: 'tree-sitter-cpp.wasm', block: 'compound_statement',
     tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: 'for_range_loop', isReturn: isReturnStatement,
+    func: ['function_definition'],
   },
   c_sharp: {
     wasm: 'tree-sitter-c_sharp.wasm', block: 'block',
     tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: 'foreach_statement', isReturn: isReturnStatement,
+    func: ['method_declaration'], constructorFunc: ['constructor_declaration'],
   },
   java: {
     wasm: 'tree-sitter-java.wasm', block: 'block',
     tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: 'enhanced_for_statement', isReturn: isReturnStatement,
+    func: ['method_declaration'], constructorFunc: ['constructor_declaration'],
   },
   python: {
     wasm: 'tree-sitter-python.wasm', block: 'block',
@@ -45,6 +53,10 @@ const LANG_CONFIG = {
     // Python "for" завжди foreach (немає C-стилю for), тож for_statement
     // тут - це Foreach, а не For.
     foreach: 'for_statement', isReturn: isReturnStatement,
+    // __init__ - Python-аналог конструктора, розпізнається за йменем
+    // нижче (EmptyFunctionRule.IGNORED_NAMES), не тут - структурно це
+    // звичайнісінький function_definition, нічим не відрізняється.
+    func: ['function_definition'],
   },
   rust: {
     wasm: 'tree-sitter-rust.wasm', block: 'block',
@@ -57,6 +69,7 @@ const LANG_CONFIG = {
     // взагалі став ПРЯМОЮ дитиною Block, а не був похований на рівень
     // глибше.
     isReturn: (n) => n.type === 'return_expression',
+    func: ['function_item'],
   },
   swift: {
     // У Swift немає окремого вузла "блок коду" - і тіло функції, і тіло
@@ -68,6 +81,7 @@ const LANG_CONFIG = {
     // continue/fallthrough/throw; розрізнити можна лише за текстом
     // першого (неіменованого) токена-ключового слова.
     isReturn: (n) => n.childCount > 0 && n.type === 'control_transfer_statement' && n.child(0).type === 'return',
+    func: ['function_declaration'],
   },
   go: {
     wasm: 'tree-sitter-go.wasm', block: 'block',
@@ -75,6 +89,9 @@ const LANG_CONFIG = {
     // мапиться на TryCatch/CatchClause) і не має окремого for_range -
     // "for" обслуговує і C-стиль, і foreach, тож лишаємо генеричний 'For'.
     tryStmt: null, catchClause: null, foreach: null, isReturn: isReturnStatement,
+    // method_declaration - метод зі своїм receiver'ом ("func (r R) f()"),
+    // окремий тип вузла від звичайної function_declaration.
+    func: ['function_declaration', 'method_declaration'],
   },
   kotlin: {
     // Як і в Swift, немає окремого вузла "блок коду" - тіло функції й
@@ -85,6 +102,10 @@ const LANG_CONFIG = {
     // так само, як control_transfer_statement у Swift; розрізняємо за
     // текстом першого токена.
     isReturn: (n) => n.type === 'jump_expression' && n.childCount > 0 && n.child(0).type === 'return',
+    // На відміну від решти мов, function_declaration тут НЕ має поля
+    // "name" узагалі (childForFieldName('name') === null) - findFunctionName()
+    // тоді підхоплює перший дочірній вузол-лист (simple_identifier).
+    func: ['function_declaration'],
   },
   ruby: {
     wasm: 'tree-sitter-ruby.wasm',
@@ -100,6 +121,15 @@ const LANG_CONFIG = {
     // вузла-блока для try-частини, на відміну від усіх інших мов) -
     // дивись mapTryCatchChildren() нижче.
     tryBodyIsFlat: true,
+    // singleton_method - "def self.foo" (метод класу, не інстансу),
+    // окремий тип вузла від звичайного "def foo" (method).
+    func: ['method', 'singleton_method'],
+    // Ruby не має фігурних дужок для тіла методу ВЗАГАЛІ (def...end), і
+    // не має мовної конструкції "метод без тіла" (на відміну від
+    // Java/C# інтерфейсів) - "def f\nend" ЗАВЖДИ означає реальний метод
+    // з (можливо порожнім) тілом, тож синтезувати Block тут безпечно
+    // завжди, без перевірки на '{' у тексті (якої тут і бути не може).
+    funcBodyIsImplicit: true,
   },
   dart: {
     wasm: 'tree-sitter-dart.wasm', block: 'block',
@@ -110,6 +140,12 @@ const LANG_CONFIG = {
     // [block(try), catch_clause, block(catch-тіло)]) - дивись
     // mapTryCatchChildren() нижче.
     catchBodyIsSibling: true,
+    // func навмисно НЕ заданий - Dart розбиває оголошення функції на ДВА
+    // окремих сусідніх вузли (function_signature + окремий function_body
+    // ПОРУЧ, а не всередині), той самий клас квірку, що й catchBodyIsSibling
+    // вище, але для функцій, не catch. Потребує окремого стикування
+    // сусідів, як mapTryCatchChildren() - не встиг протестувати надійно.
+    // empty-function/long-function поки не працюють для .dart.
   },
   zig: {
     wasm: 'tree-sitter-zig.wasm', block: 'block',
@@ -121,11 +157,19 @@ const LANG_CONFIG = {
     // "return 1;" у Zig, так само як у Rust, - return_expression,
     // обгорнутий у expression_statement (return - вираз).
     isReturn: (n) => n.type === 'return_expression',
+    func: ['function_declaration'],
   },
   objc: {
     wasm: 'tree-sitter-objc.wasm', block: 'compound_statement',
     tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: null,
     isReturn: isReturnStatement,
+    // func навмисно НЕ заданий - Objective-C змішує C-стиль
+    // function_definition з властивим лише йому method_definition
+    // (-/+ методи), обидва вимагають окремої перевірки перед тим, як
+    // вмикати тут - не хочу вгадувати й видавати непротестовану
+    // поведінку. empty-function/long-function поки не працюють для
+    // .m/.mm файлів, решта правил (dead-code-after-return/empty-catch/
+    // empty-block/hardcoded-secret/todo-tracker) - працюють як і раніше.
   },
   solidity: {
     // function_body сам по собі НЕ обгорнутий у block_statement - його
@@ -135,6 +179,7 @@ const LANG_CONFIG = {
     wasm: 'tree-sitter-solidity.wasm', block: ['block_statement', 'function_body'],
     tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: null,
     isReturn: isReturnStatement,
+    func: ['function_definition'],
   },
 };
 
@@ -156,6 +201,41 @@ try {
 
 function matchesBlock(type) {
   return Array.isArray(cfg.block) ? cfg.block.includes(type) : type === cfg.block;
+}
+
+const isFuncType = (type) => Array.isArray(cfg.func) && cfg.func.includes(type);
+const isConstructorType = (type) => Array.isArray(cfg.constructorFunc) && cfg.constructorFunc.includes(type);
+
+// Ім'я функції не завжди власне поле вузла: C/C++ ховає його на кілька
+// рівнів глибше в "declarator" (function_declarator.declarator, і ще
+// глибше для вказівників типу "int *f()"), а Kotlin не має поля "name"
+// узагалі - тому рекурсивно йдемо по "declarator", а якщо й того нема -
+// падаємо на перший дочірній вузол-лист (без власних дітей), який у
+// граматиках без явного поля зазвичай і є ідентифікатором імені.
+function findFunctionName(node) {
+  // Лист (немає власних named-дітей) - це вже сам ідентифікатор, брати
+  // з нього поле "name"/"declarator" нікуди - вони не існують у листа.
+  // Без цієї перевірки C/C++ рекурсія заходить на рівень глибше, ніж
+  // треба (function_declarator МАЄ власне поле "declarator", що веде на
+  // identifier, а identifier - уже лист) і повертає '?' замість імені.
+  if (node.namedChildCount === 0) {
+    return node.text;
+  }
+  const nameField = node.childForFieldName('name');
+  if (nameField) {
+    return nameField.text;
+  }
+  const declField = node.childForFieldName('declarator');
+  if (declField) {
+    return findFunctionName(declField);
+  }
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const c = node.namedChild(i);
+    if (c.namedChildCount === 0) {
+      return c.text;
+    }
+  }
+  return '?';
 }
 
 function mapNode(node, isRoot) {
@@ -186,6 +266,10 @@ function mapNode(node, isRoot) {
     canonicalType = 'Do';
   } else if (type === 'for_statement' || type === 'for_expression') {
     canonicalType = 'For';
+  } else if (isConstructorType(type)) {
+    canonicalType = 'FunctionDecl';
+  } else if (isFuncType(type)) {
+    canonicalType = 'FunctionDecl';
   } else {
     canonicalType = 'Other';
   }
@@ -208,14 +292,46 @@ function mapNode(node, isRoot) {
     children = [body ? mapNode(body, false) : { type: 'Block', line, attributes: {}, children: [] }];
   } else if (canonicalType === 'TryCatch' && (cfg.catchBodyIsSibling || cfg.tryBodyIsFlat)) {
     children = mapTryCatchChildren(node);
+  } else if (canonicalType === 'FunctionDecl') {
+    children = namedChildren(node).map((c) => mapNode(c, false));
+    // Той самий квірк, що й у CatchClause вище, тут для тіла функції:
+    // Ruby "def f\nend" (порожній метод) не породжує вузол body_statement
+    // ВЗАГАЛІ, коли тіла нема - без синтезованого Block тут
+    // EmptyFunctionRule.findBody() не знайде жодної дитини типу Block і
+    // просто мовчки пропустить цей найпоширеніший випадок.
+    //
+    // АЛЕ на відміну від CatchClause, тут синтезувати Block НАОСЛІП
+    // небезпечно: Java/C# використовують ОДИН тип вузла method_declaration
+    // і для "void f() {}" (реалізований, тіло порожнє), і для
+    // "void f();" в інтерфейсі (тіла НЕМА ВЗАГАЛІ - валідна конструкція,
+    // не забута реалізація) - без перевірки нижче другий випадок хибно
+    // ловився б як "порожня функція". Синтезуємо, лише якщо в сирому
+    // тексті функції реально Є фігурна дужка (підтверджує "тіло є, воно
+    // порожнє") АБО мова взагалі не використовує фігурні дужки й завжди
+    // має якесь тіло (Ruby - funcBodyIsImplicit).
+    if (!children.some((c) => c.type === 'Block') && (cfg.funcBodyIsImplicit || node.text.includes('{'))) {
+      children.push({ type: 'Block', line, attributes: {}, children: [] });
+    }
   } else {
     children = namedChildren(node).map((c) => mapNode(c, false));
+  }
+
+  let attributes = {};
+  if (canonicalType === 'Other') {
+    attributes = { kind: type };
+  } else if (canonicalType === 'FunctionDecl') {
+    // isConstructorType() перевіряється ОКРЕМИМ полем конфігу
+    // (constructorFunc), а не за іменем - ім'я конструктора зазвичай
+    // збігається з назвою класу ("public Foo()"), не буквально
+    // "constructor", тож EmptyFunctionRule.IGNORED_NAMES його б не
+    // впізнав без цього примусового перейменування.
+    attributes = { name: isConstructorType(type) ? 'constructor' : findFunctionName(node) };
   }
 
   return {
     type: canonicalType,
     line,
-    attributes: canonicalType === 'Other' ? { kind: type } : {},
+    attributes,
     children,
   };
 }

@@ -34,7 +34,7 @@ final class EmptyFunctionRule implements Rule
     use GenuineEmptinessCheck;
 
     /** @var list<string> */
-    private const IGNORED_NAMES = ['{closure}', 'constructor', '__construct'];
+    private const IGNORED_NAMES = ['{closure}', 'constructor', '__construct', '__init__'];
 
     public function name(): string
     {

@@ -7,6 +7,7 @@ namespace AnyLint\Rules;
 use AnyLint\Ast\Node;
 use AnyLint\Finding;
 use AnyLint\Rule;
+use AnyLint\Rules\Support\GenuineEmptinessCheck;
 use AnyLint\Severity;
 
 /**
@@ -19,6 +20,8 @@ use AnyLint\Severity;
  */
 final class EmptyFunctionRule implements Rule
 {
+    use GenuineEmptinessCheck;
+
     public function name(): string
     {
         return 'empty-function';
@@ -29,7 +32,7 @@ final class EmptyFunctionRule implements Rule
         $findings = [];
         foreach ($root->findAll('FunctionDecl') as $func) {
             $body = $this->findBody($func);
-            if ($body === null || $body->children !== []) {
+            if ($body === null || $body->children !== [] || !$this->isGenuinelyEmpty($func, $source)) {
                 continue;
             }
 

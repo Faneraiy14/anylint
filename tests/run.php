@@ -112,6 +112,12 @@ $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
 check('непорожній catch — жодної знахідки', count($empty) === 0);
 rrmdir(dirname($f));
 
+$f = tempPhpFile("function f() { try { g(); } catch (\Exception \$e) {\n    // навмисно ігноруємо, помилка тут очікувана\n} }");
+$findings = newAnalyzer()->analyzePath($f);
+$empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
+check('catch лише з коментарем — жодної знахідки (пояснено навмисно)', count($empty) === 0);
+rrmdir(dirname($f));
+
 // --- Тест 2б: deep-nesting ---
 echo "2б. DeepNestingRule\n";
 $f = tempPhpFile('function f() { if (true) { if (true) { if (true) { if (true) { if (true) { echo "глибоко"; } } } } } }');
@@ -144,6 +150,12 @@ $f = tempPhpFile('function f() { echo "не порожня"; }');
 $findings = newAnalyzer()->analyzePath($f);
 $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
 check('непорожня функція — жодної знахідки', count($empty) === 0);
+rrmdir(dirname($f));
+
+$f = tempPhpFile("function f() {\n    // TODO: реалізувати пізніше, навмисна заглушка\n}");
+$findings = newAnalyzer()->analyzePath($f);
+$empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+check('функція лише з коментарем — жодної знахідки (пояснено навмисно)', count($empty) === 0);
 rrmdir(dirname($f));
 
 $f = tempPhpFile('interface I { function f(); }');
@@ -196,6 +208,12 @@ $f = tempPhpFile('function f() { if (true) { echo "не порожньо"; } }')
 $findings = newAnalyzer()->analyzePath($f);
 $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
 check('непорожній if — жодної знахідки', count($eb) === 0);
+rrmdir(dirname($f));
+
+$f = tempPhpFile("function f() { if (true) {\n    // навмисно нічого не робимо тут\n} }");
+$findings = newAnalyzer()->analyzePath($f);
+$eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+check('if лише з коментарем — жодної знахідки (пояснено навмисно)', count($eb) === 0);
 rrmdir(dirname($f));
 
 // --- Тест 3: unused-variable ---

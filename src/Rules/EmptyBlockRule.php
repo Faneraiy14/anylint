@@ -7,6 +7,7 @@ namespace AnyLint\Rules;
 use AnyLint\Ast\Node;
 use AnyLint\Finding;
 use AnyLint\Rule;
+use AnyLint\Rules\Support\GenuineEmptinessCheck;
 use AnyLint\Severity;
 
 /**
@@ -17,6 +18,8 @@ use AnyLint\Severity;
  */
 final class EmptyBlockRule implements Rule
 {
+    use GenuineEmptinessCheck;
+
     /** @var list<string> */
     private const CONTROL_TYPES = ['If', 'For', 'Foreach', 'While', 'Do'];
 
@@ -32,6 +35,9 @@ final class EmptyBlockRule implements Rule
             foreach ($root->findAll($type) as $node) {
                 foreach ($node->children as $block) {
                     if ($block->type !== 'Block' || $block->children !== []) {
+                        continue;
+                    }
+                    if (!$this->isGenuinelyEmpty($node, $source)) {
                         continue;
                     }
                     $findings[] = new Finding(

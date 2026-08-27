@@ -27,6 +27,7 @@ use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Providers\ZigProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\DeepNestingRule;
+use AnyLint\Rules\EmptyBlockRule;
 use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\EmptyFunctionRule;
 use AnyLint\Rules\HardcodedSecretRule;
@@ -89,6 +90,7 @@ $analyzer = (new Analyzer())
     ->withProvider(new SolidityProvider(getenv('NODE_EXE') ?: 'node'))
     ->withRule(new DeadCodeAfterReturnRule())
     ->withRule(new DeepNestingRule())
+    ->withRule(new EmptyBlockRule())
     ->withRule(new EmptyCatchRule())
     ->withRule(new EmptyFunctionRule())
     ->withRule(new HardcodedSecretRule())

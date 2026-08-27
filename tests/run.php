@@ -25,6 +25,7 @@ use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Providers\ZigProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\DeepNestingRule;
+use AnyLint\Rules\EmptyBlockRule;
 use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\EmptyFunctionRule;
 use AnyLint\Rules\HardcodedSecretRule;
@@ -74,6 +75,7 @@ function newAnalyzer(): Analyzer
         ->withProvider(new PhpProvider())
         ->withRule(new DeadCodeAfterReturnRule())
         ->withRule(new DeepNestingRule())
+        ->withRule(new EmptyBlockRule())
         ->withRule(new EmptyCatchRule())
         ->withRule(new EmptyFunctionRule())
         ->withRule(new HardcodedSecretRule())
@@ -162,6 +164,38 @@ $f = tempPhpFile('function f() { ' . str_repeat('echo 1;', 30) . ' }');
 $findings = newAnalyzer()->analyzePath($f);
 $long = array_filter($findings, fn ($x) => $x->rule === 'long-function');
 check('30 стейтментів (межа) — жодної знахідки', count($long) === 0);
+rrmdir(dirname($f));
+
+// --- Тест 2ґ: empty-block ---
+echo "2ґ. EmptyBlockRule\n";
+$f = tempPhpFile('function f() { if (true) { } }');
+$findings = newAnalyzer()->analyzePath($f);
+$eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+check('порожній if знайдено', count($eb) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('function f() { for ($i = 0; $i < 10; $i++) { } }');
+$findings = newAnalyzer()->analyzePath($f);
+$eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+check('порожній for знайдено', count($eb) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('function f() { while (true) { } }');
+$findings = newAnalyzer()->analyzePath($f);
+$eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+check('порожній while знайдено', count($eb) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('function f() { do { } while (true); }');
+$findings = newAnalyzer()->analyzePath($f);
+$eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+check('порожній do-while знайдено', count($eb) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('function f() { if (true) { echo "не порожньо"; } }');
+$findings = newAnalyzer()->analyzePath($f);
+$eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+check('непорожній if — жодної знахідки', count($eb) === 0);
 rrmdir(dirname($f));
 
 // --- Тест 3: unused-variable ---
@@ -420,6 +454,7 @@ if (!$nodeAvailable) {
             ->withProvider($provider)
             ->withRule(new DeadCodeAfterReturnRule())
             ->withRule(new DeepNestingRule())
+            ->withRule(new EmptyBlockRule())
             ->withRule(new EmptyCatchRule())
             ->withRule(new EmptyFunctionRule())
             ->withRule(new LongFunctionRule());
@@ -446,6 +481,12 @@ if (!$nodeAvailable) {
         $findings = $analyzer->analyzePath($f);
         $deep = array_filter($findings, fn ($x) => $x->rule === 'deep-nesting');
         check("deep-nesting ловить .{$ext}", count($deep) === 1);
+        rrmdir(dirname($f));
+
+        $f = tempJsFile($ext, "function f() {\n  if (a) {\n  }\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+        check("empty-block ловить .{$ext}", count($eb) === 1);
         rrmdir(dirname($f));
 
         $f = tempJsFile($ext, "function f() {\n}\n");

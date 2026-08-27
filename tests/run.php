@@ -24,6 +24,7 @@ use AnyLint\Providers\SwiftProvider;
 use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Providers\ZigProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
+use AnyLint\Rules\DeepNestingRule;
 use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\HardcodedSecretRule;
 use AnyLint\Rules\TodoTrackerRule;
@@ -70,6 +71,7 @@ function newAnalyzer(): Analyzer
     return (new Analyzer())
         ->withProvider(new PhpProvider())
         ->withRule(new DeadCodeAfterReturnRule())
+        ->withRule(new DeepNestingRule())
         ->withRule(new EmptyCatchRule())
         ->withRule(new HardcodedSecretRule())
         ->withRule(new UnusedVariableRule())
@@ -102,6 +104,26 @@ $f = tempPhpFile('function f() { try { g(); } catch (\Exception $e) { log($e); }
 $findings = newAnalyzer()->analyzePath($f);
 $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
 check('непорожній catch — жодної знахідки', count($empty) === 0);
+rrmdir(dirname($f));
+
+// --- Тест 2б: deep-nesting ---
+echo "2б. DeepNestingRule\n";
+$f = tempPhpFile('function f() { if (true) { if (true) { if (true) { if (true) { if (true) { echo "глибоко"; } } } } } }');
+$findings = newAnalyzer()->analyzePath($f);
+$deep = array_filter($findings, fn ($x) => $x->rule === 'deep-nesting');
+check('5 рівнів вкладеності — знайдено рівно 1', count($deep) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('function f() { if (true) { if (true) { if (true) { if (true) { echo "ще ок"; } } } } }');
+$findings = newAnalyzer()->analyzePath($f);
+$deep = array_filter($findings, fn ($x) => $x->rule === 'deep-nesting');
+check('4 рівні вкладеності — жодної знахідки', count($deep) === 0);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('function f() { if (true) { if (true) { if (true) { try { g(); } catch (\Exception $e) { echo "catch не рахується окремо"; } } } } }');
+$findings = newAnalyzer()->analyzePath($f);
+$deep = array_filter($findings, fn ($x) => $x->rule === 'deep-nesting');
+check('CatchClause не додає зайвий рівень поверх TryCatch', count($deep) === 0);
 rrmdir(dirname($f));
 
 // --- Тест 3: unused-variable ---
@@ -359,6 +381,7 @@ if (!$nodeAvailable) {
         $analyzer = (new Analyzer())
             ->withProvider($provider)
             ->withRule(new DeadCodeAfterReturnRule())
+            ->withRule(new DeepNestingRule())
             ->withRule(new EmptyCatchRule());
 
         $f = tempJsFile($ext, "function f() {\n  return 1;\n  console.log('мертвий код');\n}\n");
@@ -377,6 +400,12 @@ if (!$nodeAvailable) {
         $findings = $analyzer->analyzePath($f);
         $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-catch');
         check("empty-catch ловить .{$ext}", count($empty) === 1);
+        rrmdir(dirname($f));
+
+        $f = tempJsFile($ext, "function f() {\n  if (a) {\n    if (b) {\n      if (c) {\n        if (d) {\n          if (e) {\n            console.log('глибоко');\n          }\n        }\n      }\n    }\n  }\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $deep = array_filter($findings, fn ($x) => $x->rule === 'deep-nesting');
+        check("deep-nesting ловить .{$ext}", count($deep) === 1);
         rrmdir(dirname($f));
 
         $f = tempJsFile($ext, "function f() {\n  return 1;\n}\n");

@@ -1,8 +1,10 @@
 {
     "name": "faneraiy14/anylint",
-    "description": "Кросплатформний статичний аналізатор коду з архітектурою плагінів під мови (PHP, NyxilumLang)",
-    "type": "project",
+    "description": "Кросплатформний статичний аналізатор коду з архітектурою плагінів під мови (PHP, NyxilumLang, JS/TS + 14 мов через tree-sitter)",
+    "type": "library",
     "license": "MIT",
+    "homepage": "https://github.com/Faneraiy14/anylint",
+    "keywords": ["static-analysis", "linter", "cross-language", "tree-sitter"],
     "authors": [{"name": "Faneraiy14"}],
     "require": {
         "php": ">=8.1",

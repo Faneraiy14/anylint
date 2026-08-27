@@ -26,6 +26,7 @@ use AnyLint\Providers\SwiftProvider;
 use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Providers\ZigProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
+use AnyLint\Rules\DeepNestingRule;
 use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\HardcodedSecretRule;
 use AnyLint\Rules\TodoTrackerRule;
@@ -85,6 +86,7 @@ $analyzer = (new Analyzer())
     ->withProvider(new ObjectiveCProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new SolidityProvider(getenv('NODE_EXE') ?: 'node'))
     ->withRule(new DeadCodeAfterReturnRule())
+    ->withRule(new DeepNestingRule())
     ->withRule(new EmptyCatchRule())
     ->withRule(new HardcodedSecretRule())
     ->withRule(new UnusedVariableRule());

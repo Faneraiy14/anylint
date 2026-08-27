@@ -318,6 +318,18 @@ $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return'
 check('лише src/ проскановано (1 знахідка, не 2)', count($dead) === 1);
 rrmdir($dir);
 
+// --- Тест 7б: пропуск dist/build/target/out (зібрані артефакти, не код) ---
+echo "7б. Пропуск dist/build/target/out\n";
+$dir = sys_get_temp_dir() . '/anylint_dir_' . uniqid('', true);
+mkdir($dir . '/src', 0777, true);
+mkdir($dir . '/dist', 0777, true);
+file_put_contents($dir . '/src/a.php', "<?php\n// TODO: реальний todo\nfunction f() {}\n");
+file_put_contents($dir . '/dist/bundled.js', "// TODO: (комусь-там) зібраний сторонній рантайм, не має вважатись\n");
+$findings = newAnalyzer()->analyzePath($dir);
+$todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
+check('dist/ пропущено (1 TODO, не 2)', count($todos) === 1);
+rrmdir($dir);
+
 // --- Тест 8: CLI окремим процесом ---
 echo "8. CLI: --json, exit-коди\n";
 function runCli(array $args): array

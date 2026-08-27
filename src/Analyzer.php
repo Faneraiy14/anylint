@@ -14,8 +14,15 @@ final class Analyzer
     /** @var Rule[] */
     private array $rules = [];
 
-    /** @var string[] теки, які ніколи не скануємо */
-    private const SKIP_DIRS = ['.git', 'vendor', 'node_modules', 'data'];
+    /**
+     * @var string[] теки, які ніколи не скануємо. dist/build - виявлено
+     * емпірично: прогін на fl-launcher-code без цього затопив звіт
+     * тисячами "знахідок" з ВБУДОВАНОГО в Electron-білд рантайму Node.js
+     * (dist/linux-unpacked/...) - TODO-коментарі самих розробників Node,
+     * не користувача. target/out - той самий клас проблеми для
+     * Rust/Java-подібних збірок.
+     */
+    private const SKIP_DIRS = ['.git', 'vendor', 'node_modules', 'data', 'dist', 'build', 'target', 'out'];
 
     public function withProvider(LanguageProvider $provider): self
     {

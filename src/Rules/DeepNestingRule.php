@@ -55,6 +55,18 @@ final class DeepNestingRule implements Rule
         }
 
         foreach ($node->children as $child) {
+            // "else if" без окремих фігурних дужок - JS/TS і всі
+            // tree-sitter-мови представляють цей ланцюжок як If, вкладений
+            // прямо в If (наступна гілка ланцюжка - природний дочірній
+            // вузол попередньої, без проміжного Block). Структурно це
+            // виглядає як вкладеність, але це той самий плаский ланцюжок
+            // умов, не нова глибина - тож рахуємо продовження на тому ж
+            // рівні, що й сам If, а не як +1. PHP цього не потребує -
+            // PhpProvider уже сплощує elseif у Block-сусідів одного If.
+            if ($node->type === 'If' && $child->type === 'If') {
+                $this->walk($child, $depth, $findings, $filePath);
+                continue;
+            }
             $this->walk($child, $nextDepth, $findings, $filePath);
         }
     }

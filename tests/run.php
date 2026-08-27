@@ -537,6 +537,17 @@ if (!$nodeAvailable) {
         check("deep-nesting ловить .{$ext}", count($deep) === 1);
         rrmdir(dirname($f));
 
+        // "else if" - плаский ланцюжок умов, а не вкладеність: JS/TS
+        // представляють кожну ланку як If, вкладений в If без Block
+        // навколо, тож без спеціальної обробки лічильник рахував би кожну
+        // гілку ланцюжка як +1 рівень. 8 послідовних "else if" не повинні
+        // спрацьовувати самі по собі.
+        $f = tempJsFile($ext, "function f() {\n  if (a) {\n  } else if (b) {\n  } else if (c) {\n  } else if (d) {\n  } else if (e) {\n  } else if (g) {\n  } else if (h) {\n  } else if (i) {\n  }\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $deep = array_filter($findings, fn ($x) => $x->rule === 'deep-nesting');
+        check("deep-nesting НЕ рахує плаский ланцюжок 'else if' в .{$ext} як вкладеність", count($deep) === 0);
+        rrmdir(dirname($f));
+
         $f = tempJsFile($ext, "function f() {\n  if (a) {\n  }\n}\n");
         $findings = $analyzer->analyzePath($f);
         $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');

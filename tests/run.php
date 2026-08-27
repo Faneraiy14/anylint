@@ -26,7 +26,9 @@ use AnyLint\Providers\ZigProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
 use AnyLint\Rules\DeepNestingRule;
 use AnyLint\Rules\EmptyCatchRule;
+use AnyLint\Rules\EmptyFunctionRule;
 use AnyLint\Rules\HardcodedSecretRule;
+use AnyLint\Rules\LongFunctionRule;
 use AnyLint\Rules\TodoTrackerRule;
 use AnyLint\Rules\UnusedVariableRule;
 
@@ -73,7 +75,9 @@ function newAnalyzer(): Analyzer
         ->withRule(new DeadCodeAfterReturnRule())
         ->withRule(new DeepNestingRule())
         ->withRule(new EmptyCatchRule())
+        ->withRule(new EmptyFunctionRule())
         ->withRule(new HardcodedSecretRule())
+        ->withRule(new LongFunctionRule())
         ->withRule(new UnusedVariableRule())
         ->withRule(new TodoTrackerRule());
 }
@@ -124,6 +128,40 @@ $f = tempPhpFile('function f() { if (true) { if (true) { if (true) { try { g(); 
 $findings = newAnalyzer()->analyzePath($f);
 $deep = array_filter($findings, fn ($x) => $x->rule === 'deep-nesting');
 check('CatchClause не додає зайвий рівень поверх TryCatch', count($deep) === 0);
+rrmdir(dirname($f));
+
+// --- Тест 2в: empty-function ---
+echo "2в. EmptyFunctionRule\n";
+$f = tempPhpFile('function f() { }');
+$findings = newAnalyzer()->analyzePath($f);
+$empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+check('порожня функція знайдена', count($empty) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('function f() { echo "не порожня"; }');
+$findings = newAnalyzer()->analyzePath($f);
+$empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+check('непорожня функція — жодної знахідки', count($empty) === 0);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('interface I { function f(); }');
+$findings = newAnalyzer()->analyzePath($f);
+$empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+check('метод інтерфейсу без тіла — не помилка (валідна конструкція)', count($empty) === 0);
+rrmdir(dirname($f));
+
+// --- Тест 2г: long-function ---
+echo "2г. LongFunctionRule\n";
+$f = tempPhpFile('function f() { ' . str_repeat('echo 1;', 31) . ' }');
+$findings = newAnalyzer()->analyzePath($f);
+$long = array_filter($findings, fn ($x) => $x->rule === 'long-function');
+check('31 стейтмент — знайдено рівно 1', count($long) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('function f() { ' . str_repeat('echo 1;', 30) . ' }');
+$findings = newAnalyzer()->analyzePath($f);
+$long = array_filter($findings, fn ($x) => $x->rule === 'long-function');
+check('30 стейтментів (межа) — жодної знахідки', count($long) === 0);
 rrmdir(dirname($f));
 
 // --- Тест 3: unused-variable ---
@@ -382,7 +420,9 @@ if (!$nodeAvailable) {
             ->withProvider($provider)
             ->withRule(new DeadCodeAfterReturnRule())
             ->withRule(new DeepNestingRule())
-            ->withRule(new EmptyCatchRule());
+            ->withRule(new EmptyCatchRule())
+            ->withRule(new EmptyFunctionRule())
+            ->withRule(new LongFunctionRule());
 
         $f = tempJsFile($ext, "function f() {\n  return 1;\n  console.log('мертвий код');\n}\n");
         $findings = $analyzer->analyzePath($f);
@@ -406,6 +446,18 @@ if (!$nodeAvailable) {
         $findings = $analyzer->analyzePath($f);
         $deep = array_filter($findings, fn ($x) => $x->rule === 'deep-nesting');
         check("deep-nesting ловить .{$ext}", count($deep) === 1);
+        rrmdir(dirname($f));
+
+        $f = tempJsFile($ext, "function f() {\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+        check("empty-function ловить .{$ext}", count($empty) === 1);
+        rrmdir(dirname($f));
+
+        $f = tempJsFile($ext, "function f() {\n" . str_repeat("  console.log(1);\n", 31) . "}\n");
+        $findings = $analyzer->analyzePath($f);
+        $long = array_filter($findings, fn ($x) => $x->rule === 'long-function');
+        check("long-function ловить .{$ext}", count($long) === 1);
         rrmdir(dirname($f));
 
         $f = tempJsFile($ext, "function f() {\n  return 1;\n}\n");

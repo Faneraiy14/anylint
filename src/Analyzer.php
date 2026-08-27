@@ -20,9 +20,12 @@ final class Analyzer
      * тисячами "знахідок" з ВБУДОВАНОГО в Electron-білд рантайму Node.js
      * (dist/linux-unpacked/...) - TODO-коментарі самих розробників Node,
      * не користувача. target/out - той самий клас проблеми для
-     * Rust/Java-подібних збірок.
+     * Rust/Java-подібних збірок. var - Symfony-кеш (var/cache): згенеровані
+     * файли перекладів з рядками на кшталт "password"/"passphrase" як
+     * значеннями словника, а не реальними секретами - виявлено на
+     * OpenSourceBikeShare (109 хибних hardcoded-secret знахідок).
      */
-    private const SKIP_DIRS = ['.git', 'vendor', 'node_modules', 'data', 'dist', 'build', 'target', 'out'];
+    private const SKIP_DIRS = ['.git', 'vendor', 'node_modules', 'data', 'dist', 'build', 'target', 'out', 'var'];
 
     public function withProvider(LanguageProvider $provider): self
     {

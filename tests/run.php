@@ -360,6 +360,18 @@ $todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
 check('dist/ пропущено (1 TODO, не 2)', count($todos) === 1);
 rrmdir($dir);
 
+// --- Тест 7в: пропуск var/ (Symfony-кеш, не код) ---
+echo "7в. Пропуск var/ (Symfony-кеш)\n";
+$dir = sys_get_temp_dir() . '/anylint_dir_' . uniqid('', true);
+mkdir($dir . '/src', 0777, true);
+mkdir($dir . '/var/cache', 0777, true);
+file_put_contents($dir . '/src/a.php', "<?php\n// TODO: реальний todo\nfunction f() {}\n");
+file_put_contents($dir . '/var/cache/catalogue.php', "<?php\n// TODO: згенерований Symfony-кеш, не має вважатись\n\$password = 'слово-переклад';\n");
+$findings = newAnalyzer()->analyzePath($dir);
+$todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
+check('var/ пропущено (1 TODO, не 2)', count($todos) === 1);
+rrmdir($dir);
+
 // --- Тест 8: CLI окремим процесом ---
 echo "8. CLI: --json, exit-коди\n";
 function runCli(array $args): array

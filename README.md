@@ -1,47 +1,49 @@
 # anylint
 
-Кросплатформний статичний аналізатор коду з архітектурою плагінів під мови — не окремий лінтер на кожну мову, а одне ядро (пошук файлів, звіт, CLI) плюс `LanguageProvider`, що перетворює рідний AST мови в одну спільну канонічну форму. Правила пишуться раз і працюють для будь-якої мови, чий провайдер коректно віддає цю форму.
+*[Українською](README.uk.md)*
 
-## Чому це не черговий PHP-лінтер
+A cross-platform static code analyzer with a language-plugin architecture — not a separate linter per language, but one core (file discovery, reporting, CLI) plus a `LanguageProvider` that converts a language's native AST into one shared canonical form. Rules are written once and work for any language whose provider correctly emits that form.
 
-Це доведено, не лише задекларовано: `NyxilumProvider` підключає [NyxilumLang](https://github.com/Faneraiy14/NyxilumLang) — зовсім іншу мову з власним лексером/парсером/VM, `JavaScriptProvider`/`TypeScriptProvider` шлють файл через TypeScript compiler API, а решта чотирнадцяти мов (C, C++, C#, Java, Python, Rust, Swift, Go, Kotlin, Ruby, Dart, Zig, Objective-C, Solidity) — через tree-sitter. Структурні правила ловлять ті самі класи багів у всіх них, що й у `.php`, **без жодної зміни коду правил**.
+## Why this isn't just another PHP linter
 
-Правила діляться на три роди — і всі мають ОДИН і той самий інтерфейс `Rule`:
+This is proven, not just claimed: `NyxilumProvider` plugs in [NyxilumLang](https://github.com/Faneraiy14/NyxilumLang) — a completely different language with its own lexer/parser/VM, `JavaScriptProvider`/`TypeScriptProvider` route the file through the TypeScript compiler API, and the remaining fourteen languages (C, C++, C#, Java, Python, Rust, Swift, Go, Kotlin, Ruby, Dart, Zig, Objective-C, Solidity) go through tree-sitter. Structural rules catch the same classes of bugs in all of them as in `.php` — **without changing a single line of rule code**.
 
-- **Структурні** (`DeadCodeAfterReturnRule`, `EmptyCatchRule`) — дивляться лише на канонічне дерево (`Block`/`Return`/`TryCatch`/`CatchClause`). Жодного натяку на PHP чи NyxilumLang в їхньому коді немає.
-- **Текстові** (`TodoTrackerRule`, `HardcodedSecretRule`) — сканують сирий текст файлу, ігноруючи AST. Працюють буквально на будь-якому файлі, навіть без зареєстрованого провайдера для його розширення.
-- **Мовно-специфічні** (`UnusedVariableRule`) — семантика "невикористаної змінної" надто різна між мовами, щоб узагальнювати без втрати сенсу, тож це правило читає рідний `PhpParser\Node` напряму (провайдер навмисно зберігає його в кожному вузлі `FunctionDecl`). Той самий інтерфейс `Rule` — просто вужче застосування.
+Rules come in three kinds — all behind ONE shared `Rule` interface:
 
-### Як працює `NyxilumProvider`
+- **Structural** (`DeadCodeAfterReturnRule`, `EmptyCatchRule`) — look only at the canonical tree (`Block`/`Return`/`TryCatch`/`CatchClause`). Their code has no idea PHP or NyxilumLang even exist.
+- **Textual** (`TodoTrackerRule`, `HardcodedSecretRule`) — scan the raw file text, ignoring the AST entirely. They work on literally any file, even one with no registered provider for its extension.
+- **Language-specific** (`UnusedVariableRule`) — the semantics of "unused variable" differ too much between languages to generalize without losing meaning, so this rule reads the native `PhpParser\Node` directly (the provider deliberately keeps it around on every `FunctionDecl` node). Same `Rule` interface — just a narrower scope of applicability.
 
-`nx ast файл.nx` ([AstJsonDumper.cs](https://github.com/Faneraiy14/NyxilumLang/blob/main/src/NyxilumLang/Tools/AstJsonDumper.cs) у самому NyxilumLang) виводить AST одразу в канонічній JSON-схемі `{"type","line","attributes","children"}` — тій самій, яку `PhpProvider` будує з дерева `nikic/php-parser`. `NyxilumProvider` тут лише запускає цей процес і робить `json_decode` — жодного мапування типів вузлів немає, бо узгоджений словник ("що є `Block`/`Return`/`CatchClause`") живе на стороні NyxilumLang. Потребує `nx` у `PATH` (або `NX_EXE=/шлях/до/nx`) — якщо його нема, файл, що аналізується, отримує `parse-error` Finding, а решта аналізу працює як завжди.
+### How `NyxilumProvider` works
 
-### Як працюють `JavaScriptProvider`/`TypeScriptProvider`
+`nx ast file.nx` ([AstJsonDumper.cs](https://github.com/Faneraiy14/NyxilumLang/blob/main/src/NyxilumLang/Tools/AstJsonDumper.cs) in NyxilumLang itself) outputs the AST directly in the canonical JSON schema `{"type","line","attributes","children"}` — the same one `PhpProvider` builds from the `nikic/php-parser` tree. `NyxilumProvider` here just runs that process and does `json_decode` — there's no node-type mapping at all, because the shared vocabulary ("what counts as `Block`/`Return`/`CatchClause`") lives on NyxilumLang's side. Requires `nx` in `PATH` (or `NX_EXE=/path/to/nx`) — if it's missing, the file being analyzed gets a `parse-error` Finding instead of derailing the whole run.
 
-Той самий трюк, що й з `nx ast`, тільки виконавчий інструмент — власний `tools/js-ast-dump/dump.js`: TypeScript compiler API (пакет `typescript`, парсить і `.js`, і `.ts` — `allowJs` там лише про перевірку типів, парсер спільний) обходить `ts.Node`-дерево і вже сам віддає ту саму канонічну JSON-схему. `.js`/`.jsx`/`.mjs`/`.cjs` і `.ts`/`.tsx` — це два окремі класи-провайдери (один плагін = одна мова), але обидва діляться спільною логікою запуску процесу через `AbstractJsFamilyProvider`. Потребує `node` у `PATH` (або `NODE_EXE=...`) і встановлених залежностей у `tools/js-ast-dump` (`npm install` там один раз) — без цього `.js`/`.ts`-файли так само отримують `parse-error` Finding, а не мовчазний збій усього прогону.
+### How `JavaScriptProvider`/`TypeScriptProvider` work
 
-### Як працюють tree-sitter-провайдери (C/C++/C#/Java/Python/Rust/Swift/Go/Kotlin/Ruby/Dart/Zig/Objective-C/Solidity)
+Same trick as `nx ast`, just with a different executable: the project's own `tools/js-ast-dump/dump.js`. The TypeScript compiler API (the `typescript` package, which parses both `.js` and `.ts` — `allowJs` there is only about type checking, the parser itself is shared) walks the `ts.Node` tree and emits that same canonical JSON schema itself. `.js`/`.jsx`/`.mjs`/`.cjs` and `.ts`/`.tsx` are two separate provider classes (one plugin = one language), but both share the process-launching logic via `AbstractJsFamilyProvider`. Requires `node` in `PATH` (or `NODE_EXE=...`) and installed dependencies in `tools/js-ast-dump` (`npm install` there once) — without that, `.js`/`.ts` files likewise get a `parse-error` Finding rather than a silent failure of the whole run.
 
-Немає одного спільного офіційного compiler API для всіх цих мов (на відміну від TypeScript для JS/TS), тож тут — [tree-sitter](https://tree-sitter.github.io/) через `web-tree-sitter` (WASM-рантайм, БЕЗ нативної компіляції) і прекомпільовані `.wasm`-граматики з пакета `tree-sitter-wasms`. `tools/treesitter-ast-dump/dump.js` бере мову ПЕРШИМ аргументом і сам обирає потрібну граматику — той самий процес, що й для JS/TS, лише один движок обслуговує чотирнадцять мов одразу.
+### How the tree-sitter providers work (C/C++/C#/Java/Python/Rust/Swift/Go/Kotlin/Ruby/Dart/Zig/Objective-C/Solidity)
 
-Кожна tree-sitter-граматика називає свій "блок коду" й "return" по-своєму — ця відповідність зафіксована в `LANG_CONFIG` усередині dump.js, а не вгадується налету:
+There's no single shared official compiler API for all these languages (unlike TypeScript for JS/TS), so this uses [tree-sitter](https://tree-sitter.github.io/) via `web-tree-sitter` (a WASM runtime, NO native compilation) with precompiled `.wasm` grammars from the `tree-sitter-wasms` package. `tools/treesitter-ast-dump/dump.js` takes the language as its FIRST argument and picks the right grammar itself — the same process as for JS/TS, just one engine serving fourteen languages at once.
 
-- **"Блок коду"**: `compound_statement` у C/C++/Objective-C, `block` у C#/Java/Python/Rust/Go, `statements` у Swift/Kotlin (там немає окремого вузла "блок" — тіло функції й тіло `if`/`do`/`for`/`while` це один і той самий тип вузла). Ruby взагалі не має ЄДИНОГО такого вузла — тіло методу це `body_statement`, тіло `if`/`rescue` це `then`, тож `cfg.block` там масив, не рядок. Solidity's `function_body` не обгорнутий у власний `block_statement` — його прямі діти вже стейтменти функції, тож `cfg.block` там теж масив (`['block_statement', 'function_body']`), інакше мертвий код одразу на верхньому рівні функції лишався б непоміченим.
-- **`return`**: у Rust і Zig це `return_expression`, обгорнутий у `expression_statement` (return — вираз, не стейтмент) — без окремого розгортання (`unwrapExpressionStatement()` у dump.js) він був би не прямою дитиною блоку, а онуком, і `dead-code-after-return` (яка дивиться лише на прямих дітей `Block`) ніколи б його не побачила. У Swift `return`/`break`/`continue`/`throw` і в Kotlin `return`/`break`/`continue` — це ОДИН тип вузла (`control_transfer_statement`/`jump_expression`); розрізняються лише за текстом першого токена, тож `isReturn()` у dump.js звіряє саме його, а не сам тип вузла.
-- **`catch`/`except`/`rescue`**: Python називає це `except`, Ruby — `rescue`, семантика та сама. Rust, Go і Zig не мають традиційного механізму винятків (Result/panic, defer/recover, і `catch`-як-оператор відповідно) — там `tryStmt`/`catchClause` просто `null`, і жодних TryCatch/CatchClause-вузлів не з'являється. Dart і Solidity мають цікаву різницю: у Dart тіло `catch` — НЕ дитина `catch_clause`, а наступний СУСІД під тим самим `try_statement`; у Ruby тіло `begin` (try-аналог) взагалі не обгорнуте в окремий блок — стейтменти try-частини ПРЯМІ діти `begin`, перемішані з `rescue`/`ensure` як сусіди. Обидва кейси розбирає окрема `mapTryCatchChildren()` у dump.js, а не генерична логіка.
+Each tree-sitter grammar names its own "block of code" and "return" differently — that mapping is pinned down in `LANG_CONFIG` inside dump.js, not guessed on the fly:
 
-Потребує `node` у `PATH` і `npm install` у `tools/treesitter-ast-dump` — так само, як і для JS/TS-дампера.
+- **"Block of code"**: `compound_statement` in C/C++/Objective-C, `block` in C#/Java/Python/Rust/Go, `statements` in Swift/Kotlin (there's no separate "block" node type there — a function body and an `if`/`do`/`for`/`while` body are the same node type). Ruby has no single such node at all — a method body is `body_statement`, an `if`/`rescue` body is `then`, so `cfg.block` is an array there, not a string. Solidity's `function_body` isn't wrapped in its own `block_statement` — its direct children are already the function's statements, so `cfg.block` is an array there too (`['block_statement', 'function_body']`), otherwise dead code right at a function's top level would go undetected.
+- **`return`**: in Rust and Zig it's `return_expression`, wrapped in `expression_statement` (return is an expression there, not a statement) — without an explicit unwrap (`unwrapExpressionStatement()` in dump.js) it would be a grandchild of the block rather than a direct child, and `dead-code-after-return` (which only looks at `Block`'s direct children) would never see it. In Swift, `return`/`break`/`continue`/`throw`, and in Kotlin `return`/`break`/`continue`, are all ONE node type (`control_transfer_statement`/`jump_expression`); they're distinguished only by the text of the first token, so `isReturn()` in dump.js checks exactly that, not the node type itself.
+- **`catch`/`except`/`rescue`**: Python calls it `except`, Ruby calls it `rescue`, same semantics. Rust, Go, and Zig don't have a traditional exception mechanism (Result/panic, defer/recover, and `catch`-as-a-builtin respectively) — there `tryStmt`/`catchClause` are simply `null`, and no TryCatch/CatchClause nodes ever appear. Dart and Solidity have an interesting quirk: in Dart, a `catch` body is NOT a child of `catch_clause` — it's the next SIBLING under the same `try_statement`; in Ruby, a `begin` body (the try-equivalent) isn't wrapped in a separate block at all — the try-part's statements are DIRECT children of `begin`, interleaved with `rescue`/`ensure` as siblings. Both cases are handled by a dedicated `mapTryCatchChildren()` in dump.js, not generic logic.
 
-Не всі мови з `tree-sitter-wasms` увійшли: Lua (у бандлованій `.wasm`-збірці граматика ламається на БУДЬ-якому багаторядковому тілі функції — очевидний баг конкретно цього білда) і Scala (парсить `return <значення>` як синтаксичну помилку, хоча `return` без значення працює) дали хибні `parse-error` на звичайному робочому коді — краще чесно не підтримувати мову, ніж видавати провайдер, який заважає більше, ніж допомагає. Bash теж відкладено: `return` там не окремий тип вузла (це просто виклик команди з іменем "return", треба звіряти текст), а тіло `if`/`while` взагалі не обгортається в окремий блок-вузол — підтримка вийшла б суттєво слабшою за решту мов.
+Requires `node` in `PATH` and `npm install` in `tools/treesitter-ast-dump` — same as for the JS/TS dumper.
 
-## Встановлення й запуск
+Not every language in `tree-sitter-wasms` made the cut: Lua (in the bundled `.wasm` build, the grammar breaks on ANY multi-line function body — an obvious bug in that specific build) and Scala (parses `return <value>` as a syntax error, though a bare `return` works fine) produced false `parse-error` results on perfectly ordinary working code — better to honestly not support a language than ship a provider that gets in the way more than it helps. Bash is also on hold for now: `return` isn't its own node type there (it's just a command invocation named "return", requiring a text check), and `if`/`while` bodies aren't wrapped in a dedicated block node at all — support would end up noticeably weaker than for the other languages.
+
+## Installation and usage
 
 ```bash
 composer install
-php bin/anylint шлях/до/коду
+php bin/anylint path/to/code
 ```
 
-Для аналізу `.js`/`.ts`- і всіх tree-sitter-мов (C/C++/C#/Java/Python/Rust/Swift/Go/Kotlin/Ruby/Dart/Zig/Objective-C/Solidity) додатково потрібно один раз:
+For analyzing `.js`/`.ts` and all the tree-sitter languages (C/C++/C#/Java/Python/Rust/Swift/Go/Kotlin/Ruby/Dart/Zig/Objective-C/Solidity), you also need, once:
 
 ```bash
 cd tools/js-ast-dump && npm install && cd -
@@ -49,53 +51,53 @@ cd tools/treesitter-ast-dump && npm install && cd -
 ```
 
 ```bash
-php bin/anylint src --json      # машинний формат, exit 1 якщо є помилки
-php bin/anylint src --no-todo   # без todo-tracker
+php bin/anylint src --json      # machine-readable format, exit 1 if there are findings
+php bin/anylint src --no-todo   # skip the todo-tracker
 ```
 
-## Що вже ловить
+## What it catches today
 
-| Правило | Тип | Що знаходить |
+| Rule | Type | What it finds |
 |---|---|---|
-| `dead-code-after-return` | структурне | код одразу після `return`, який ніколи не виконається |
-| `deep-nesting` | структурне | `if`/`for`/`while`/`try` вкладені одне в одне глибше 4 рівнів — важко читати й тестувати |
-| `empty-block` | структурне | порожнє тіло `if`/`for`/`foreach`/`while`/`do` — забута логіка чи заглушка |
-| `empty-catch` | структурне | `catch` без жодної дії всередині — помилка проковтується мовчки |
-| `empty-function` | структурне (FunctionDecl: усі мови, крім Objective-C) | тіло функції порожнє — забута реалізація чи заглушка |
-| `long-function` | структурне (та сама межа покриття, що й `empty-function`) | понад 30 стейтментів на верхньому рівні функції — варто розбити |
-| `unused-variable` | PHP-специфічне | змінна присвоюється й ніде більше не з'являється |
-| `hardcoded-secret` | текстове | GitHub/AWS-токени, приватні ключі, `password = "..."` прямо в коді |
-| `todo-tracker` | текстове | `// TODO` / `# FIXME` в коментарях (не в рядках чи іменах) |
+| `dead-code-after-return` | structural | code right after a `return` that will never execute |
+| `deep-nesting` | structural | `if`/`for`/`while`/`try` nested more than 4 levels deep — hard to read and test |
+| `empty-block` | structural | an empty `if`/`for`/`foreach`/`while`/`do` body — forgotten logic or a stub |
+| `empty-catch` | structural | a `catch` with no action inside — an error silently swallowed |
+| `empty-function` | structural (FunctionDecl: every language except Objective-C) | an empty function body — a forgotten implementation or a stub |
+| `long-function` | structural (same coverage boundary as `empty-function`) | over 30 top-level statements in a function — worth splitting up |
+| `unused-variable` | PHP-specific | a variable is assigned and never referenced again |
+| `hardcoded-secret` | textual | GitHub/AWS tokens, private keys, `password = "..."` right in the code |
+| `todo-tracker` | textual | `// TODO` / `# FIXME` in comments (not in strings or identifiers) |
 
-## Архітектура
+## Architecture
 
 ```
 src/
-  Ast/Node.php          — канонічний вузол (type, line, attributes, children, native)
-  LanguageProvider.php  — інтерфейс плагіна мови: supports($file), parse($file): Node
-  Rule.php               — інтерфейс правила: check($root, $source, $file): Finding[]
-  Providers/PhpProvider.php     — nikic/php-parser -> канонічне дерево
-  Providers/NyxilumProvider.php — `nx ast` (JSON) -> канонічне дерево
-  Providers/AbstractJsFamilyProvider.php — спільний запуск tools/js-ast-dump/dump.js -> канонічне дерево
-  Providers/JavaScriptProvider.php, TypeScriptProvider.php — розширення файлів для AbstractJsFamilyProvider
-  Providers/AbstractTreeSitterProvider.php — спільний запуск tools/treesitter-ast-dump/dump.js -> канонічне дерево
+  Ast/Node.php          — the canonical node (type, line, attributes, children, native)
+  LanguageProvider.php  — the language-plugin interface: supports($file), parse($file): Node
+  Rule.php               — the rule interface: check($root, $source, $file): Finding[]
+  Providers/PhpProvider.php     — nikic/php-parser -> canonical tree
+  Providers/NyxilumProvider.php — `nx ast` (JSON) -> canonical tree
+  Providers/AbstractJsFamilyProvider.php — shared launch of tools/js-ast-dump/dump.js -> canonical tree
+  Providers/JavaScriptProvider.php, TypeScriptProvider.php — file extensions for AbstractJsFamilyProvider
+  Providers/AbstractTreeSitterProvider.php — shared launch of tools/treesitter-ast-dump/dump.js -> canonical tree
   Providers/CProvider.php, CppProvider.php, CSharpProvider.php, JavaProvider.php,
     PythonProvider.php, RustProvider.php, SwiftProvider.php, GoProvider.php,
     KotlinProvider.php, RubyProvider.php, DartProvider.php, ZigProvider.php,
-    ObjectiveCProvider.php, SolidityProvider.php — розширення файлів + мова tree-sitter для AbstractTreeSitterProvider
-tools/js-ast-dump/dump.js          — TypeScript compiler API -> та сама канонічна JSON-схема, що й "nx ast"
-tools/treesitter-ast-dump/dump.js  — tree-sitter (14 мов, LANG_CONFIG) -> та сама канонічна JSON-схема
-  Rules/*                — самі правила
-  Analyzer.php            — обхід файлів, вибір провайдера, запуск правил
-bin/anylint                — CLI
+    ObjectiveCProvider.php, SolidityProvider.php — file extensions + tree-sitter language for AbstractTreeSitterProvider
+tools/js-ast-dump/dump.js          — TypeScript compiler API -> the same canonical JSON schema as "nx ast"
+tools/treesitter-ast-dump/dump.js  — tree-sitter (14 languages, LANG_CONFIG) -> the same canonical JSON schema
+  Rules/*                — the rules themselves
+  Analyzer.php            — file traversal, provider selection, running the rules
+bin/anylint                — the CLI
 ```
 
-Додати нову мову = написати клас `LanguageProvider`, зареєструвати `->withProvider(new ...)` в `bin/anylint` — жодних змін у ядрі чи в існуючих структурних/текстових правилах.
+Adding a new language = write one `LanguageProvider` class and register it with `->withProvider(new ...)` in `bin/anylint` — no changes to the core or to any existing structural/textual rule.
 
-## Стійкість до нових версій PHP
+## Resilience against new PHP releases
 
-CI ганяє тести на матриці версій PHP (8.1–8.4) плюс окремо на nightly-збірці — щоб несумісність із новим релізом PHP виявилась за кілька хвилин у Actions, а не через рік боляче вручну. Єдина реальна залежність — `nikic/php-parser`, активно підтримуваний пакет, що сам оновлюється під нові версії PHP; `composer.lock` закомічено для відтворюваних збірок.
+CI runs the test suite across a matrix of PHP versions (8.1–8.4) plus a separate nightly build — so an incompatibility with a new PHP release shows up in a few minutes in Actions, not painfully a year later by hand. The only real dependency is `nikic/php-parser`, an actively maintained package that keeps itself updated for new PHP versions; `composer.lock` is committed for reproducible builds.
 
-## Ліцензія
+## License
 
-MIT, див. [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

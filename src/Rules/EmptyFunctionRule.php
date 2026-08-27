@@ -17,10 +17,24 @@ use AnyLint\Severity;
  * "дужки є, тіла нема" ($body->children === []) - функцію БЕЗ дужок
  * узагалі (наприклад abstract-метод) навмисно НЕ рахує знахідкою, бо це
  * валідна мовна конструкція, а не забута реалізація.
+ *
+ * Два додаткових винятки, знайдені емпірично на реальному коді (порожні
+ * анонімні колбеки в fl-launcher-code - жоден із 40 не був реальним
+ * багом):
+ * - Анонімні функції ('{closure}') - канонічна схема не розрізняє
+ *   "оголошена й забута" від "передана аргументом як навмисний no-op"
+ *   (options.onX || (() => {}), .catch(() => {})) - і на практиці
+ *   ПЕРЕВАЖНА більшість порожніх анонімних функцій саме друге. Іменована
+ *   функція, навпаки, - значно сильніший сигнал забутої реалізації.
+ * - 'constructor' - порожній конструктор класу без власного стану
+ *   (лише методи) - звична, а не забута конструкція.
  */
 final class EmptyFunctionRule implements Rule
 {
     use GenuineEmptinessCheck;
+
+    /** @var list<string> */
+    private const IGNORED_NAMES = ['{closure}', 'constructor', '__construct'];
 
     public function name(): string
     {
@@ -37,6 +51,9 @@ final class EmptyFunctionRule implements Rule
             }
 
             $name = is_string($func->attributes['name'] ?? null) ? $func->attributes['name'] : '?';
+            if (in_array($name, self::IGNORED_NAMES, true)) {
+                continue;
+            }
             $findings[] = new Finding(
                 $filePath,
                 $func->line,

@@ -164,6 +164,18 @@ $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
 check('метод інтерфейсу без тіла — не помилка (валідна конструкція)', count($empty) === 0);
 rrmdir(dirname($f));
 
+$f = tempPhpFile('function f() { $cb = function() {}; return $cb; }');
+$findings = newAnalyzer()->analyzePath($f);
+$empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+check('порожнє анонімне замикання-аргумент — не помилка (майже завжди навмисний no-op)', count($empty) === 0);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('class C { function __construct() {} }');
+$findings = newAnalyzer()->analyzePath($f);
+$empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+check('порожній __construct — не помилка (клас без стану)', count($empty) === 0);
+rrmdir(dirname($f));
+
 // --- Тест 2г: long-function ---
 echo "2г. LongFunctionRule\n";
 $f = tempPhpFile('function f() { ' . str_repeat('echo 1;', 31) . ' }');
@@ -523,6 +535,12 @@ if (!$nodeAvailable) {
         $findings = $analyzer->analyzePath($f);
         $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
         check("empty-function ловить .{$ext}", count($empty) === 1);
+        rrmdir(dirname($f));
+
+        $f = tempJsFile($ext, "async function f() {\n  await g().catch(() => {});\n}\n");
+        $findings = $analyzer->analyzePath($f);
+        $empty = array_filter($findings, fn ($x) => $x->rule === 'empty-function');
+        check("empty-function не ловить .catch(() => {}) в .{$ext}", count($empty) === 0);
         rrmdir(dirname($f));
 
         $f = tempJsFile($ext, "function f() {\n" . str_repeat("  console.log(1);\n", 31) . "}\n");

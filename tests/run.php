@@ -690,6 +690,18 @@ if (!$treesitterAvailable) {
             // Тіло catch у Dart - сусід catch_clause, а не його дитина
             // (mapTryCatchChildren() у dump.js) - саме цей кейс перевіряє.
             'catch' => "int f() {\n  try {\n    g();\n  } catch (e) {\n  }\n  return 0;\n}\n",
+            // function_signature і function_body - окремі СУСІДНІ вузли, а
+            // не батько-дитина (mapChildrenWithDartFunctionStitching() у
+            // dump.js), і топ-рівнева функція, і клас-метод обгорнуті
+            // по-різному (method_signature додає ще один рівень) - обидва
+            // кейси нижче перевіряють окремо.
+            // Клас-метод навмисно, не топ-рівнева функція: тіло класу
+            // обгортає function_signature ще одним вузлом method_signature
+            // (без власного поля "name") - складніший з двох шляхів
+            // стикування, топ-рівневий case уже перевірений вручну під
+            // час розробки.
+            'emptyFunc' => "class A {\n  void f() {\n  }\n}\n",
+            'longFunc' => "class A {\n  void f() {\n" . str_repeat("    g();\n", 31) . "  }\n}\n",
             'clean' => "int f(int x) {\n  if (x > 0) {\n    return 1;\n  }\n  return 0;\n}\n",
         ],
         'Zig' => [

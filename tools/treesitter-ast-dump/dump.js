@@ -140,12 +140,15 @@ const LANG_CONFIG = {
     // [block(try), catch_clause, block(catch-тіло)]) - дивись
     // mapTryCatchChildren() нижче.
     catchBodyIsSibling: true,
-    // func навмисно НЕ заданий - Dart розбиває оголошення функції на ДВА
-    // окремих сусідніх вузли (function_signature + окремий function_body
-    // ПОРУЧ, а не всередині), той самий клас квірку, що й catchBodyIsSibling
-    // вище, але для функцій, не catch. Потребує окремого стикування
-    // сусідів, як mapTryCatchChildren() - не встиг протестувати надійно.
-    // empty-function/long-function поки не працюють для .dart.
+    // func навмисно НЕ заданий (і не може бути - немає одного вузла, що
+    // представляв би "функцію цілком"): Dart розбиває оголошення функції
+    // на ДВА окремих СУСІДНІХ вузли (function_signature + окремий
+    // function_body поруч, а не всередині одне одного) - той самий клас
+    // квірку, що й catchBodyIsSibling вище, але для функцій, не catch.
+    // funcSigIsSibling вмикає mapChildrenWithDartFunctionStitching() -
+    // стикує пару в один канонічний FunctionDecl на рівні будь-якого
+    // батька (Root/тіло класу/вкладений block).
+    funcSigIsSibling: true,
   },
   zig: {
     wasm: 'tree-sitter-zig.wasm', block: 'block',
@@ -312,6 +315,8 @@ function mapNode(node, isRoot) {
     if (!children.some((c) => c.type === 'Block') && (cfg.funcBodyIsImplicit || node.text.includes('{'))) {
       children.push({ type: 'Block', line, attributes: {}, children: [] });
     }
+  } else if (cfg.funcSigIsSibling) {
+    children = mapChildrenWithDartFunctionStitching(namedChildren(node));
   } else {
     children = namedChildren(node).map((c) => mapNode(c, false));
   }
@@ -410,6 +415,60 @@ function mapTryCatchChildren(node) {
     } else {
       result.push(mapNode(child, false));
     }
+  }
+  return result;
+}
+
+// Dart-специфічне: function_signature і НАСТУПНИЙ function_body -
+// окремі СУСІДНІ вузли (немає одного спільного батька "функція" - на
+// відміну від УСІХ інших мов), тож немає єдиного вузла, який можна
+// перевірити через cfg.func/isFuncType() у mapNode(). Замість цього
+// стискаємо пару в один канонічний FunctionDecl тут, на рівні БУДЬ-
+// ЯКОГО батька, що перелічує своїх дітей (Root/тіло класу/вкладений
+// block для локальних функцій - усі йдуть через ЦЕЙ самий генеричний
+// шлях mapNode()).
+function mapChildrenWithDartFunctionStitching(raw) {
+  const result = [];
+  for (let i = 0; i < raw.length; i++) {
+    const child = raw[i];
+    // Метод усередині класу обгорнутий ще на рівень глибше: тіло класу
+    // містить method_signature (без власного поля "name"), а РЕАЛЬНИЙ
+    // function_signature (з полем "name") - його ЄДИНА дитина. Топ-рівневі
+    // й локальні функції такої обгортки не мають - function_signature іде
+    // напряму. Обидва випадки пари з function_body-СУСІДОМ саме
+    // method_signature/function_signature (не вкладеного вузла).
+    let sigSource = null;
+    if (child.type === 'function_signature') {
+      sigSource = child;
+    } else if (child.type === 'method_signature') {
+      sigSource = findNamedChild(child, (c) => c.type === 'function_signature');
+    }
+    if (!sigSource) {
+      result.push(mapNode(child, false));
+      continue;
+    }
+    const line = child.startPosition.row + 1;
+    const nameNode = sigSource.childForFieldName('name');
+    const sigChildren = namedChildren(sigSource).map((c) => mapNode(c, false));
+    const next = raw[i + 1];
+    let blockChild = { type: 'Block', line, attributes: {}, children: [] };
+    if (next && next.type === 'function_body') {
+      // function_body сам обгортає ще один вузол block усередині - не
+      // мапимо function_body напряму (він не matchesBlock(), осів би в
+      // дереві як 'Other' з вкладеним Block, а не прямою дитиною
+      // FunctionDecl, і findBody() у EmptyFunctionRule його не побачив би).
+      const inner = findNamedChild(next, (c) => matchesBlock(c.type));
+      if (inner) {
+        blockChild = mapNode(inner, false);
+      }
+      i++;
+    }
+    result.push({
+      type: 'FunctionDecl',
+      line,
+      attributes: { name: nameNode ? nameNode.text : '?' },
+      children: [...sigChildren, blockChild],
+    });
   }
   return result;
 }

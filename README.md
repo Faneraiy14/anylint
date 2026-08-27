@@ -61,7 +61,7 @@ php bin/anylint src --no-todo   # без todo-tracker
 | `deep-nesting` | структурне | `if`/`for`/`while`/`try` вкладені одне в одне глибше 4 рівнів — важко читати й тестувати |
 | `empty-block` | структурне | порожнє тіло `if`/`for`/`foreach`/`while`/`do` — забута логіка чи заглушка |
 | `empty-catch` | структурне | `catch` без жодної дії всередині — помилка проковтується мовчки |
-| `empty-function` | структурне (FunctionDecl: PHP, JS/TS, C/C++/C#/Java/Python/Rust/Swift/Go/Kotlin/Ruby/Zig/Solidity — не Dart/Objective-C) | тіло функції порожнє — забута реалізація чи заглушка |
+| `empty-function` | структурне (FunctionDecl: усі мови, крім Objective-C) | тіло функції порожнє — забута реалізація чи заглушка |
 | `long-function` | структурне (та сама межа покриття, що й `empty-function`) | понад 30 стейтментів на верхньому рівні функції — варто розбити |
 | `unused-variable` | PHP-специфічне | змінна присвоюється й ніде більше не з'являється |
 | `hardcoded-secret` | текстове | GitHub/AWS-токени, приватні ключі, `password = "..."` прямо в коді |

@@ -85,6 +85,24 @@ final class PhpProvider implements LanguageProvider
                 [],
                 [$this->convertStmts($stmt->stmts)],
             ),
+            // 🔥 ВИПРАВЛЕНО (та сама діра, глибше): "namespace Foo;" (без
+            // фігурних дужок) php-parser усе одно представляє як
+            // Stmt\Namespace_, що ОБГОРТАЄ буквально всі наступні top-level
+            // стейтменти аж до кінця файлу (use-імпорти, сам клас) у своєму
+            // ->stmts - а Namespace_ теж не мав тут жодної гілки. Тобто
+            // фікс ClassLike вище сам по собі НЕ рятував жоден реальний
+            // PSR-4-файл із namespace (це практично 100% сучасного PHP,
+            // включно з усім OpenSourceBikeShare) - Namespace_ ховав клас
+            // ще до того, як гілка ClassLike взагалі отримувала шанс
+            // спрацювати. Виявлено емпірично: findAll('FunctionDecl') на
+            // реальному src/Db/PdoDbResult.php досі давав 0 навіть ПІСЛЯ
+            // фіксу ClassLike, поки не додано цю гілку.
+            $stmt instanceof Stmt\Namespace_ => new Node(
+                'Block',
+                $line,
+                [],
+                [$this->convertStmts($stmt->stmts)],
+            ),
             // Замикання в значенні return: "return function() { ... };".
             $stmt instanceof Stmt\Return_ => new Node(
                 'Return',

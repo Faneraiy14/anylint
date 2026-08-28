@@ -30,6 +30,7 @@ use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\EmptyFunctionRule;
 use AnyLint\Rules\HardcodedSecretRule;
 use AnyLint\Rules\LongFunctionRule;
+use AnyLint\Rules\PromotableReturnTypeRule;
 use AnyLint\Rules\TodoTrackerRule;
 use AnyLint\Rules\UnusedVariableRule;
 
@@ -81,6 +82,7 @@ function newAnalyzer(): Analyzer
         ->withRule(new HardcodedSecretRule())
         ->withRule(new LongFunctionRule())
         ->withRule(new UnusedVariableRule())
+        ->withRule(new PromotableReturnTypeRule())
         ->withRule(new TodoTrackerRule());
 }
 
@@ -240,6 +242,66 @@ $f = tempPhpFile('function f() { $used = 1; return $used; }');
 $findings = newAnalyzer()->analyzePath($f);
 $unused = array_filter($findings, fn ($x) => $x->rule === 'unused-variable');
 check('використана змінна — жодної знахідки', count($unused) === 0);
+rrmdir(dirname($f));
+
+// --- Тест 3б: структурні правила бачать середину МЕТОДІВ КЛАСУ ---
+// Регресія на реальний баг: PhpProvider не мав жодної гілки для
+// Stmt\ClassLike (class/interface/trait/enum) - клас провалювався в
+// непрозорий 'Other', і жодне структурне правило ніколи не бачило
+// коду всередині методів. Раніше existing тести на класах (interface-
+// метод без тіла, порожній __construct) перевіряли лише ВІДСУТНІСТЬ
+// знахідки - що тривіально проходило й тоді, коли клас узагалі не
+// обходився, тому діра лишалась непоміченою.
+echo "3б. Структурні правила всередині методів класу\n";
+$f = tempPhpFile('class C { function f() { $unused = 1; return 2; } }');
+$findings = newAnalyzer()->analyzePath($f);
+$unused = array_filter($findings, fn ($x) => $x->rule === 'unused-variable');
+check('unused-variable бачить тіло методу класу', count($unused) === 1);
+rrmdir(dirname($f));
+
+$f = tempPhpFile('class C { function f() { return 1; echo "мертвий код у методі"; } }');
+$findings = newAnalyzer()->analyzePath($f);
+$dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+check('dead-code-after-return бачить тіло методу класу', count($dead) === 1);
+rrmdir(dirname($f));
+
+// --- Тест 3в: promotable-return-type ---
+echo "3в. PromotableReturnTypeRule\n";
+$f = tempPhpFile("class C {\n/**\n * @return array|null\n */\nfunction f() { return null; }\n}");
+$findings = newAnalyzer()->analyzePath($f);
+$promo = array_filter($findings, fn ($x) => $x->rule === 'promotable-return-type');
+check('простий @return-тип без нативного - знайдено', count($promo) === 1);
+if (count($promo) === 1) {
+    $finding = array_values($promo)[0];
+    check('fix.replacement коректний', $finding->fix['replacement'] === ': array|null');
+}
+rrmdir(dirname($f));
+
+$f = tempPhpFile("class C {\n/**\n * @return array<string, int>\n */\nfunction f() { return []; }\n}");
+$findings = newAnalyzer()->analyzePath($f);
+$promo = array_filter($findings, fn ($x) => $x->rule === 'promotable-return-type');
+check('generic-тип (array<...>) НЕ пропонується до автопромоції', count($promo) === 0);
+rrmdir(dirname($f));
+
+$f = tempPhpFile("class C {\n/**\n * @return int\n */\nfunction f(): int { return 1; }\n}");
+$findings = newAnalyzer()->analyzePath($f);
+$promo = array_filter($findings, fn ($x) => $x->rule === 'promotable-return-type');
+check('уже нативно типізований метод - жодної знахідки', count($promo) === 0);
+rrmdir(dirname($f));
+
+$f = tempPhpFile("class C {\n/**\n * @return string\n */\nfunction f(\$x = (1 + 2)) { return \"hi\"; }\n}");
+$findings = newAnalyzer()->analyzePath($f);
+$promo = array_filter($findings, fn ($x) => $x->rule === 'promotable-return-type');
+check('вкладені дужки в значенні параметра за замовчуванням не збивають офсет', count($promo) === 1);
+if (count($promo) === 1) {
+    $finding = array_values($promo)[0];
+    $offset = $finding->fix['startOffset'];
+    $original = file_get_contents($f);
+    $fixed = substr($original, 0, $offset) . $finding->fix['replacement'] . substr($original, $offset);
+    file_put_contents($f, $fixed);
+    exec('php -l ' . escapeshellarg($f) . ' 2>&1', $lintOut, $lintCode);
+    check('застосований фікс дає валідний PHP (php -l)', $lintCode === 0);
+}
 rrmdir(dirname($f));
 
 // --- Тест 4: hardcoded-secret ---

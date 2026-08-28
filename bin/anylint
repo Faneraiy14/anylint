@@ -32,6 +32,7 @@ use AnyLint\Rules\EmptyCatchRule;
 use AnyLint\Rules\EmptyFunctionRule;
 use AnyLint\Rules\HardcodedSecretRule;
 use AnyLint\Rules\LongFunctionRule;
+use AnyLint\Rules\PromotableReturnTypeRule;
 use AnyLint\Rules\TodoTrackerRule;
 use AnyLint\Rules\UnusedVariableRule;
 use AnyLint\Severity;
@@ -95,7 +96,8 @@ $analyzer = (new Analyzer())
     ->withRule(new EmptyFunctionRule())
     ->withRule(new HardcodedSecretRule())
     ->withRule(new LongFunctionRule())
-    ->withRule(new UnusedVariableRule());
+    ->withRule(new UnusedVariableRule())
+    ->withRule(new PromotableReturnTypeRule());
 
 if (!$noTodo) {
     $analyzer->withRule(new TodoTrackerRule());
@@ -117,6 +119,7 @@ if ($json) {
             'rule' => $f->rule,
             'severity' => $f->severity->value,
             'message' => $f->message,
+            'fix' => $f->fix,
         ], $findings),
     // JSON_INVALID_UTF8_SUBSTITUTE: без нього json_encode() МОВЧКИ повертає
     // false, якщо повідомлення будь-якої Finding (напр. текст TODO-коментаря

@@ -65,6 +65,26 @@ final class PhpProvider implements LanguageProvider
                 $stmt->stmts !== null ? [$this->convertStmts($stmt->stmts)] : [],
                 $stmt,
             ),
+            // 🔥 ВИПРАВЛЕНО: class/interface/trait/enum (Stmt\ClassLike) не
+            // мали ВЗАГАЛІ жодної гілки тут - провалювались у default нижче
+            // й ставали непрозорим 'Other', тіло якого findNestedClosures()
+            // НЕ обходить (він шукає лише Expr\Closure, не Stmt\ClassMethod).
+            // Наслідок: жодне структурне правило (dead-code-after-return,
+            // unused-variable, deep-nesting, тепер і promotable-return-type)
+            // НІКОЛИ не бачило коду всередині методів класу - лише код у
+            // функціях верхнього рівня. Для реального ООП PHP-коду (майже
+            // весь Symfony/Laravel-стиль, зокрема OpenSourceBikeShare) це
+            // означало, що структурні правила мовчки не аналізували
+            // практично нічого. tests/run.php мав лише НЕГАТИВНІ тести на
+            // класах (interface-метод без тіла, порожній __construct) -
+            // вони проходили і тоді, коли клас узагалі не обходився, тому
+            // діра лишалась непоміченою.
+            $stmt instanceof Stmt\ClassLike => new Node(
+                'Block',
+                $line,
+                [],
+                [$this->convertStmts($stmt->stmts)],
+            ),
             // Замикання в значенні return: "return function() { ... };".
             $stmt instanceof Stmt\Return_ => new Node(
                 'Return',

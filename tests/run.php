@@ -244,6 +244,24 @@ $unused = array_filter($findings, fn ($x) => $x->rule === 'unused-variable');
 check('використана змінна — жодної знахідки', count($unused) === 0);
 rrmdir(dirname($f));
 
+// Реальна хибна знахідка з OpenSourceBikeShare: присвоєння суперглобалі
+// ($_ENV = ...; для скидання оточення в tearDown тестів) синтаксично
+// виглядає як "одне присвоєння, більше не згадується" - але семантично
+// не забута локальна змінна, а навмисний сторонній ефект.
+$f = tempPhpFile('function f() { $_ENV = ["FOO" => "bar"]; }');
+$findings = newAnalyzer()->analyzePath($f);
+$unused = array_filter($findings, fn ($x) => $x->rule === 'unused-variable');
+check('присвоєння суперглобалі ($_ENV) не позначається як невикористане', count($unused) === 0);
+rrmdir(dirname($f));
+
+// Ще одна реальна хибна знахідка звідти ж: compact('connector', ...) читає
+// $connector за рядковим іменем, невидимо для підрахунку Expr\Variable.
+$f = tempPhpFile('function f() { $connector = "x"; return compact("connector"); }');
+$findings = newAnalyzer()->analyzePath($f);
+$unused = array_filter($findings, fn ($x) => $x->rule === 'unused-variable');
+check('змінна, прочитана через compact(), не позначається як невикористана', count($unused) === 0);
+rrmdir(dirname($f));
+
 // --- Тест 3б: структурні правила бачать середину МЕТОДІВ КЛАСУ ---
 // Регресія на реальний баг: PhpProvider не мав жодної гілки для
 // Stmt\ClassLike (class/interface/trait/enum) - клас провалювався в

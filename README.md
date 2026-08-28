@@ -66,8 +66,10 @@ php bin/anylint src --no-todo   # skip the todo-tracker
 | `empty-function` | structural (FunctionDecl: every language except Objective-C) | an empty function body — a forgotten implementation or a stub |
 | `long-function` | structural (same coverage boundary as `empty-function`) | over 30 top-level statements in a function — worth splitting up |
 | `unused-variable` | PHP-specific | a variable is assigned and never referenced again |
+| `promotable-return-type` | PHP-specific, with auto-fix | a method's `@return TYPE` docblock could be a native return type instead |
 | `hardcoded-secret` | textual | GitHub/AWS tokens, private keys, `password = "..."` right in the code |
 | `todo-tracker` | textual | `// TODO` / `# FIXME` in comments (not in strings or identifiers) |
+| `windows-script-encoding` | textual, `.ps1`/`.bat`/`.cmd` only | Cyrillic (or other non-ASCII) without a UTF-8 BOM in `.ps1` — legacy Windows PowerShell 5.1 misreads it; any non-ASCII at all in `.bat`/`.cmd` — `cmd.exe`'s encoding handling is unreliable regardless of BOM |
 
 ## Architecture
 

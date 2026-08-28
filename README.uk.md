@@ -66,8 +66,10 @@ php bin/anylint src --no-todo   # без todo-tracker
 | `empty-function` | структурне (FunctionDecl: усі мови, крім Objective-C) | тіло функції порожнє — забута реалізація чи заглушка |
 | `long-function` | структурне (та сама межа покриття, що й `empty-function`) | понад 30 стейтментів на верхньому рівні функції — варто розбити |
 | `unused-variable` | PHP-специфічне | змінна присвоюється й ніде більше не з'являється |
+| `promotable-return-type` | PHP-специфічне, з автофіксом | `@return TYPE` у докблоці методу можна зробити нативним типом |
 | `hardcoded-secret` | текстове | GitHub/AWS-токени, приватні ключі, `password = "..."` прямо в коді |
 | `todo-tracker` | текстове | `// TODO` / `# FIXME` в коментарях (не в рядках чи іменах) |
+| `windows-script-encoding` | текстове, лише `.ps1`/`.bat`/`.cmd` | кирилиця (чи інше не-ASCII) без UTF-8 BOM у `.ps1` — легасі Windows PowerShell 5.1 читає неправильно; будь-яке не-ASCII в `.bat`/`.cmd` — кодування `cmd.exe` ненадійне незалежно від BOM |
 
 ## Архітектура
 

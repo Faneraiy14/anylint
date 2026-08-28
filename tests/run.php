@@ -5,6 +5,8 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
+use AnyLint\Finding;
+use AnyLint\Formatters\CheckstyleFormatter;
 use AnyLint\Providers\CProvider;
 use AnyLint\Providers\CppProvider;
 use AnyLint\Providers\CSharpProvider;
@@ -373,6 +375,43 @@ $findings = newAnalyzer()->analyzePath($f);
 $enc = array_filter($findings, fn ($x) => $x->rule === 'windows-script-encoding');
 check('.sh (не Windows-скрипт) - правило взагалі не застосовується', count($enc) === 0);
 rrmdir(dirname($f));
+
+// --- Тест 3д: CheckstyleFormatter (--checkstyle) ---
+// Навіщо: PhpStorm/JetBrains IDE не читають наш --json, зате вміють
+// нативно імпортувати Checkstyle XML через File Watcher - без окремого
+// плагіна на IntelliJ Platform.
+echo "3д. CheckstyleFormatter\n";
+$xml = CheckstyleFormatter::format([
+    new Finding('src/A.php', 3, 'empty-catch', \AnyLint\Severity::Warning, 'Порожній catch'),
+    new Finding('src/A.php', 10, 'hardcoded-secret', \AnyLint\Severity::Error, 'Знайдено секрет'),
+    new Finding('src/B.php', 1, 'todo-tracker', \AnyLint\Severity::Info, 'TODO: <fix> & "escape" me'),
+]);
+$sxml = simplexml_load_string($xml);
+check('XML парситься', $sxml !== false);
+if ($sxml !== false) {
+    $files = $sxml->xpath('/checkstyle/file');
+    check('2 елементи <file> (згруповано по файлу)', count($files) === 2);
+    $fileA = $sxml->xpath('/checkstyle/file[@name="src/A.php"]');
+    check('src/A.php знайдено', count($fileA) === 1);
+    if (count($fileA) === 1) {
+        $errorsA = $fileA[0]->xpath('error');
+        check('у src/A.php рівно 2 <error>', count($errorsA) === 2);
+        check('атрибути першої помилки коректні', (string) $errorsA[0]['line'] === '3'
+            && (string) $errorsA[0]['severity'] === 'warning'
+            && (string) $errorsA[0]['message'] === 'Порожній catch'
+            && (string) $errorsA[0]['source'] === 'anylint.empty-catch');
+    }
+    $fileB = $sxml->xpath('/checkstyle/file[@name="src/B.php"]');
+    if (count($fileB) === 1) {
+        $errorsB = $fileB[0]->xpath('error');
+        check('спецсимволи (< & ") в повідомленні коректно екрановані й читаються назад', count($errorsB) === 1
+            && (string) $errorsB[0]['message'] === 'TODO: <fix> & "escape" me');
+    }
+}
+
+$emptyXml = CheckstyleFormatter::format([]);
+$sxmlEmpty = simplexml_load_string($emptyXml);
+check('без знахідок - валідний XML без жодного <file>', $sxmlEmpty !== false && count($sxmlEmpty->xpath('/checkstyle/file')) === 0);
 
 // --- Тест 4: hardcoded-secret ---
 echo "4. HardcodedSecretRule\n";

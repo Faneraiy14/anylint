@@ -52,6 +52,8 @@ cd tools/treesitter-ast-dump && npm install && cd -
 
 ```bash
 php bin/anylint src --json      # machine-readable format, exit 1 if there are findings
+php bin/anylint src --checkstyle # Checkstyle XML — PhpStorm/other JetBrains IDEs import this
+                                 # natively via a File Watcher, no custom plugin needed
 php bin/anylint src --no-todo   # skip the todo-tracker
 ```
 
@@ -90,6 +92,7 @@ src/
 tools/js-ast-dump/dump.js          — TypeScript compiler API -> the same canonical JSON schema as "nx ast"
 tools/treesitter-ast-dump/dump.js  — tree-sitter (14 languages, LANG_CONFIG) -> the same canonical JSON schema
   Rules/*                — the rules themselves
+  Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (for --checkstyle)
   Analyzer.php            — file traversal, provider selection, running the rules
 bin/anylint                — the CLI
 ```

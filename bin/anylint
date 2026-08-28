@@ -7,6 +7,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
 use AnyLint\Finding;
+use AnyLint\Formatters\CheckstyleFormatter;
 use AnyLint\Providers\CProvider;
 use AnyLint\Providers\CppProvider;
 use AnyLint\Providers\CSharpProvider;
@@ -41,14 +42,17 @@ use AnyLint\Severity;
 $args = array_slice($argv, 1);
 
 if (in_array('--help', $args, true) || $args === []) {
-    echo "anylint <шлях> [--json] [--no-todo]\n";
+    echo "anylint <шлях> [--json] [--checkstyle] [--no-todo]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
     echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go,\n";
     echo "        Kotlin, Ruby, Dart, Zig, Objective-C, Solidity.\n";
+    echo "  --checkstyle: вивід у форматі Checkstyle XML (File Watcher у PhpStorm та інших IDE\n";
+    echo "                вміє імпортувати цей формат нативно, без окремого плагіна).\n";
     exit(0);
 }
 
 $json = in_array('--json', $args, true);
+$checkstyle = in_array('--checkstyle', $args, true);
 $noTodo = in_array('--no-todo', $args, true);
 $path = null;
 foreach ($args as $arg) {
@@ -110,6 +114,11 @@ try {
 } catch (\RuntimeException $e) {
     fwrite(STDERR, $e->getMessage() . "\n");
     exit(2);
+}
+
+if ($checkstyle) {
+    echo CheckstyleFormatter::format($findings);
+    exit($findings === [] ? 0 : 1);
 }
 
 if ($json) {

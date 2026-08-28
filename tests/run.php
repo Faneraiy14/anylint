@@ -33,6 +33,7 @@ use AnyLint\Rules\LongFunctionRule;
 use AnyLint\Rules\PromotableReturnTypeRule;
 use AnyLint\Rules\TodoTrackerRule;
 use AnyLint\Rules\UnusedVariableRule;
+use AnyLint\Rules\WindowsScriptEncodingRule;
 
 $failures = 0;
 $passed = 0;
@@ -55,6 +56,15 @@ function tempPhpFile(string $contents): string
     mkdir($dir);
     $path = $dir . '/test.php';
     file_put_contents($path, "<?php\n" . $contents);
+    return $path;
+}
+
+function tempFile(string $ext, string $contents): string
+{
+    $dir = sys_get_temp_dir() . '/anylint_test_' . uniqid('', true);
+    mkdir($dir);
+    $path = $dir . '/test.' . $ext;
+    file_put_contents($path, $contents);
     return $path;
 }
 
@@ -83,6 +93,7 @@ function newAnalyzer(): Analyzer
         ->withRule(new LongFunctionRule())
         ->withRule(new UnusedVariableRule())
         ->withRule(new PromotableReturnTypeRule())
+        ->withRule(new WindowsScriptEncodingRule())
         ->withRule(new TodoTrackerRule());
 }
 
@@ -320,6 +331,47 @@ if (count($promo) === 1) {
     exec('php -l ' . escapeshellarg($f) . ' 2>&1', $lintOut, $lintCode);
     check('застосований фікс дає валідний PHP (php -l)', $lintCode === 0);
 }
+rrmdir(dirname($f));
+
+// --- Тест 3г: windows-script-encoding ---
+// Народжене з реальних живих багів того ж вечора: install-nx.ps1 без
+// UTF-8 BOM ламав парсинг у Windows PowerShell 5.1, окремий .bat з
+// кирилицею ламався в cmd.exe так само.
+echo "3г. WindowsScriptEncodingRule\n";
+$f = tempFile('ps1', "# без BOM\nWrite-Host \"Привіт, світ\"\n");
+$findings = newAnalyzer()->analyzePath($f);
+$enc = array_filter($findings, fn ($x) => $x->rule === 'windows-script-encoding');
+check('.ps1 з кирилицею без BOM - знайдено', count($enc) === 1);
+rrmdir(dirname($f));
+
+$f = tempFile('ps1', "\xEF\xBB\xBF# з BOM\nWrite-Host \"Привіт, світ\"\n");
+$findings = newAnalyzer()->analyzePath($f);
+$enc = array_filter($findings, fn ($x) => $x->rule === 'windows-script-encoding');
+check('.ps1 з кирилицею і BOM - жодної знахідки', count($enc) === 0);
+rrmdir(dirname($f));
+
+$f = tempFile('ps1', "# clean ASCII\nWrite-Host \"Hello, world\"\n");
+$findings = newAnalyzer()->analyzePath($f);
+$enc = array_filter($findings, fn ($x) => $x->rule === 'windows-script-encoding');
+check('.ps1 без не-ASCII взагалі - жодної знахідки (BOM не потрібен)', count($enc) === 0);
+rrmdir(dirname($f));
+
+$f = tempFile('bat', "@echo off\necho \xd0\x9f\xd1\x80\xd0\xb8\xd0\xb2\xd1\x96\xd1\x82\npause\n");
+$findings = newAnalyzer()->analyzePath($f);
+$enc = array_filter($findings, fn ($x) => $x->rule === 'windows-script-encoding');
+check('.bat з кирилицею - знайдено (незалежно від BOM)', count($enc) === 1);
+rrmdir(dirname($f));
+
+$f = tempFile('bat', "@echo off\necho Hello\npause\n");
+$findings = newAnalyzer()->analyzePath($f);
+$enc = array_filter($findings, fn ($x) => $x->rule === 'windows-script-encoding');
+check('.bat чистий ASCII - жодної знахідки', count($enc) === 0);
+rrmdir(dirname($f));
+
+$f = tempFile('sh', "#!/bin/bash\necho \"Привіт\"\n");
+$findings = newAnalyzer()->analyzePath($f);
+$enc = array_filter($findings, fn ($x) => $x->rule === 'windows-script-encoding');
+check('.sh (не Windows-скрипт) - правило взагалі не застосовується', count($enc) === 0);
 rrmdir(dirname($f));
 
 // --- Тест 4: hardcoded-secret ---

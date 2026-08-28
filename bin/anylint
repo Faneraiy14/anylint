@@ -35,6 +35,7 @@ use AnyLint\Rules\LongFunctionRule;
 use AnyLint\Rules\PromotableReturnTypeRule;
 use AnyLint\Rules\TodoTrackerRule;
 use AnyLint\Rules\UnusedVariableRule;
+use AnyLint\Rules\WindowsScriptEncodingRule;
 use AnyLint\Severity;
 
 $args = array_slice($argv, 1);
@@ -97,7 +98,8 @@ $analyzer = (new Analyzer())
     ->withRule(new HardcodedSecretRule())
     ->withRule(new LongFunctionRule())
     ->withRule(new UnusedVariableRule())
-    ->withRule(new PromotableReturnTypeRule());
+    ->withRule(new PromotableReturnTypeRule())
+    ->withRule(new WindowsScriptEncodingRule());
 
 if (!$noTodo) {
     $analyzer->withRule(new TodoTrackerRule());

@@ -16,6 +16,7 @@ use AnyLint\Providers\GoProvider;
 use AnyLint\Providers\JavaProvider;
 use AnyLint\Providers\JavaScriptProvider;
 use AnyLint\Providers\KotlinProvider;
+use AnyLint\Providers\LuaProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\ObjectiveCProvider;
 use AnyLint\Providers\PhpProvider;
@@ -45,7 +46,7 @@ if (in_array('--help', $args, true) || $args === []) {
     echo "anylint <шлях> [--json] [--checkstyle] [--no-todo]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
     echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go,\n";
-    echo "        Kotlin, Ruby, Dart, Zig, Objective-C, Solidity.\n";
+    echo "        Kotlin, Lua, Ruby, Dart, Zig, Objective-C, Solidity.\n";
     echo "  --checkstyle: вивід у форматі Checkstyle XML (File Watcher у PhpStorm та інших IDE\n";
     echo "                вміє імпортувати цей формат нативно, без окремого плагіна).\n";
     exit(0);
@@ -89,6 +90,7 @@ $analyzer = (new Analyzer())
     ->withProvider(new SwiftProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new GoProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new KotlinProvider(getenv('NODE_EXE') ?: 'node'))
+    ->withProvider(new LuaProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new RubyProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new DartProvider(getenv('NODE_EXE') ?: 'node'))
     ->withProvider(new ZigProvider(getenv('NODE_EXE') ?: 'node'))

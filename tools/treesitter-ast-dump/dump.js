@@ -184,6 +184,41 @@ const LANG_CONFIG = {
     isReturn: isReturnStatement,
     func: ['function_definition'],
   },
+  lua: {
+    wasm: 'tree-sitter-lua.wasm', block: 'block',
+    // Lua не має синтаксичного try/catch - обробка помилок через
+    // pcall/xpcall (звичайні виклики функцій, не мовна конструкція),
+    // тож структурно нема аналога, як і в C/Rust/Go/Zig.
+    tryStmt: null, catchClause: null,
+    // Lua розрізняє "for i=1,10 do" (числовий) і "for k,v in pairs(t) do"
+    // (generic/foreach) ОКРЕМИМИ типами вузлів - жоден не збігається з
+    // дефолтним for_statement/for_expression, тож forStmt/foreach обидва
+    // задані явно, а не покладаються на спільну гілку інших мов.
+    foreach: 'for_generic_statement', forStmt: ['for_numeric_statement'],
+    // "do ... end" у Lua - ПРОСТО блок для скоупінгу (типовий трюк
+    // раннього return без порушення правила "return - останній стейтмент
+    // блоку"), НЕ цикл - на відміну від УСІХ інших підтримуваних мов, де
+    // do_statement завжди означає do-while. Справжній цикл із
+    // постумовою тут - repeat_statement, тож doStmt перевизначено, а
+    // "голий" do_statement свідомо лишається 'Other' (не рахується
+    // керуючою конструкцією для deep-nesting/empty-block - порожній
+    // "do end" не забута логіка, а рідкісний навмисний скоуп).
+    doStmt: ['repeat_statement'],
+    isReturn: isReturnStatement,
+    func: ['function_definition_statement', 'local_function_definition_statement'],
+    // Lua не має фігурних дужок УЗАГАЛІ (function...end) - той самий
+    // випадок, що й Ruby: "function f() end" ЗАВЖДИ означає реальну
+    // функцію з (можливо порожнім) тілом, синтезувати Block безпечно
+    // завжди, без перевірки на '{' у тексті.
+    funcBodyIsImplicit: true,
+    // На відміну від C-подібних мов (де {} завжди лишається вузлом навіть
+    // порожнім), Lua ВЗАГАЛІ не породжує вузол block, коли тіло if/while/
+    // for/repeat порожнє ("if x then end" не має жодної дитини-блока) -
+    // перевірено на реальному дереві розбору tree-sitter, не здогадка.
+    // Без цього прапорця EmptyBlockRule мовчки пропускав би саме
+    // найпоширеніший випадок порожнього тіла.
+    controlBodyIsImplicit: true,
+  },
 };
 
 const lang = process.argv[2];
@@ -208,6 +243,25 @@ function matchesBlock(type) {
 
 const isFuncType = (type) => Array.isArray(cfg.func) && cfg.func.includes(type);
 const isConstructorType = (type) => Array.isArray(cfg.constructorFunc) && cfg.constructorFunc.includes(type);
+
+// За замовчуванням 'do_statement' скрізь означає do-while-цикл. Lua -
+// єдиний виняток: там do_statement - це просто блок для скоупінгу (не
+// цикл узагалі), а справжній цикл із постумовою - repeat_statement.
+// cfg.doStmt перевизначає, який тип вузла рахується 'Do' для мов, де
+// стандартна назва зайнята чимось іншим.
+function matchesDo(type) {
+  return Array.isArray(cfg.doStmt) ? cfg.doStmt.includes(type) : type === 'do_statement';
+}
+
+// Аналогічно For: Lua розділяє числовий for ("for i=1,10 do") і
+// generic for ("for k,v in ..."), у ДВА різних типи вузлів
+// (for_numeric_statement/for_generic_statement), жоден з яких не
+// збігається з дефолтним for_statement/for_expression.
+function matchesExtraFor(type) {
+  return Array.isArray(cfg.forStmt) && cfg.forStmt.includes(type);
+}
+
+const CONTROL_CANONICAL_TYPES = ['If', 'While', 'Do', 'For', 'Foreach'];
 
 // Ім'я функції не завжди власне поле вузла: C/C++ ховає його на кілька
 // рівнів глибше в "declarator" (function_declarator.declarator, і ще
@@ -265,9 +319,9 @@ function mapNode(node, isRoot) {
     canonicalType = 'If';
   } else if (type === 'while_statement' || type === 'while_expression') {
     canonicalType = 'While';
-  } else if (type === 'do_statement') {
+  } else if (matchesDo(type)) {
     canonicalType = 'Do';
-  } else if (type === 'for_statement' || type === 'for_expression') {
+  } else if (type === 'for_statement' || type === 'for_expression' || matchesExtraFor(type)) {
     canonicalType = 'For';
   } else if (isConstructorType(type)) {
     canonicalType = 'FunctionDecl';
@@ -319,6 +373,16 @@ function mapNode(node, isRoot) {
     children = mapChildrenWithDartFunctionStitching(namedChildren(node));
   } else {
     children = namedChildren(node).map((c) => mapNode(c, false));
+  }
+
+  // Той самий квірк, що й у FunctionDecl вище, тут для If/While/Do/For/
+  // Foreach: мови без фігурних дужок (Lua) не породжують ЖОДНОГО дочірнього
+  // вузла-блока, коли тіло контролюючої конструкції порожнє ("if x then
+  // end" не має жодної дитини-block у сирому дереві tree-sitter) - без
+  // синтезованого Block тут EmptyBlockRule (яка шукає ПРЯМУ дитину типу
+  // 'Block') просто мовчки пропустить цей найпоширеніший випадок.
+  if (cfg.controlBodyIsImplicit && CONTROL_CANONICAL_TYPES.includes(canonicalType) && !children.some((c) => c.type === 'Block')) {
+    children = [...children, { type: 'Block', line, attributes: {}, children: [] }];
   }
 
   let attributes = {};

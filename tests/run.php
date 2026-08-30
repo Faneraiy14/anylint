@@ -15,6 +15,7 @@ use AnyLint\Providers\GoProvider;
 use AnyLint\Providers\JavaProvider;
 use AnyLint\Providers\JavaScriptProvider;
 use AnyLint\Providers\KotlinProvider;
+use AnyLint\Providers\LuaProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\ObjectiveCProvider;
 use AnyLint\Providers\PhpProvider;
@@ -470,6 +471,15 @@ $todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
 check('"https://TODO..." у рядку — НЕ хибна знахідка', count($todos) === 0);
 rrmdir(dirname($f));
 
+// Знайдено живцем при перевірці Lua-підтримки: TodoTrackerRule
+// (текстове, "працює на будь-якому файлі") не розпізнавав -- як
+// коментар (Lua/SQL/Haskell-стиль), лише //, # і /* */.
+$f = tempFile('lua', "-- TODO: реалізувати валідацію\nlocal function f() end\n");
+$findings = newAnalyzer()->analyzePath($f);
+$todos = array_filter($findings, fn ($x) => $x->rule === 'todo-tracker');
+check('TODO у -- коментарі (Lua) знайдено', count($todos) === 1);
+rrmdir(dirname($f));
+
 // --- Тест 5б: замикання — раніше повністю невидимі для структурних
 // правил (усортовуючий callback/array_map як окремий стейтмент не
 // потрапляв у жодну match-гілку PhpProvider::convertStmt, лишався
@@ -909,6 +919,29 @@ if (!$treesitterAvailable) {
             'emptyFunc' => "fn f() void {\n}\n",
             'clean' => "fn f(x: i32) i32 {\n    if (x > 0) {\n        return 1;\n    }\n    return 0;\n}\n",
         ],
+        'Lua' => [
+            'ext' => 'lua',
+            'provider' => new LuaProvider($nodeExe),
+            // На відміну від УСІХ інших мов у цій таблиці, "код одразу
+            // після return у ТОМУ САМОМУ блоці" неможливо написати
+            // валідним Lua - мова вимагає, щоб return був ОСТАННІМ
+            // стейтментом свого блоку (справжня синтаксична помилка, не
+            // просто стиль), тож ця конкретна перевірка структурно не
+            // застосовна тут - dead-code-after-return все одно ловить
+            // мертвий код через ідіому "do return end", перевірено окремо
+            // в блоці 11б нижче разом із доказом самої синтаксичної
+            // заборони.
+            'dead' => null,
+            // Lua не має синтаксичного try/catch (pcall/xpcall - звичайні
+            // виклики функцій, не мовна конструкція) - структурно нема
+            // аналога, як і в C/Rust/Go/Zig.
+            'catch' => null,
+            // "function f() end" - Lua не має фігурних дужок узагалі
+            // (funcBodyIsImplicit у dump.js), тіло синтезується завжди.
+            'emptyFunc' => "function f()\nend\n",
+            'longFunc' => "function f()\n" . str_repeat("  g()\n", 31) . "end\n",
+            'clean' => "function f(x)\n  if x > 0 then\n    return 1\n  end\n  return 0\nend\n",
+        ],
         'Objective-C' => [
             'ext' => 'm',
             'provider' => new ObjectiveCProvider($nodeExe),
@@ -934,11 +967,13 @@ if (!$treesitterAvailable) {
             ->withRule(new EmptyFunctionRule())
             ->withRule(new LongFunctionRule());
 
-        $f = tempJsFile($case['ext'], $case['dead']);
-        $findings = $analyzer->analyzePath($f);
-        $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
-        check("dead-code-after-return ловить {$langName}", count($dead) === 1);
-        rrmdir(dirname($f));
+        if ($case['dead'] !== null) {
+            $f = tempJsFile($case['ext'], $case['dead']);
+            $findings = $analyzer->analyzePath($f);
+            $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+            check("dead-code-after-return ловить {$langName}", count($dead) === 1);
+            rrmdir(dirname($f));
+        }
 
         if ($case['catch'] !== null) {
             $f = tempJsFile($case['ext'], $case['catch']);
@@ -978,6 +1013,80 @@ if (!$treesitterAvailable) {
         check("чистий {$langName}-код — жодної хибної знахідки", count($dead) === 0);
         rrmdir(dirname($f));
     }
+
+    // --- Тест 11б: Lua-специфічні квірки, знайдені при додаванні мови -
+    // жоден з них не має аналога в решті tree-sitter-провайдерів вище,
+    // тож перевіряється окремо від спільного циклу.
+    echo "11б. LuaProvider - специфічні квірки (порожні тіла без вузла block, do/repeat, числовий/generic for)\n";
+    $luaAnalyzer = (new Analyzer())
+        ->withProvider(new LuaProvider($nodeExe))
+        ->withRule(new EmptyBlockRule())
+        ->withRule(new DeepNestingRule())
+        ->withRule(new DeadCodeAfterReturnRule());
+
+    // "if x then end" - Lua взагалі не породжує вузол block, коли тіло
+    // порожнє (на відміну від C-подібних мов, де {} лишається вузлом
+    // навіть порожнім) - controlBodyIsImplicit у dump.js синтезує його.
+    $f = tempJsFile('lua', "function f(x)\n  if x then\n  end\nend\n");
+    $findings = $luaAnalyzer->analyzePath($f);
+    $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+    check('порожній if (без вузла block у сирому дереві) знайдено', count($eb) === 1);
+    rrmdir(dirname($f));
+
+    $f = tempJsFile('lua', "function f()\n  while true do\n  end\nend\n");
+    $findings = $luaAnalyzer->analyzePath($f);
+    $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+    check('порожній while знайдено', count($eb) === 1);
+    rrmdir(dirname($f));
+
+    $f = tempJsFile('lua', "function f()\n  for i = 1, 10 do\n  end\nend\n");
+    $findings = $luaAnalyzer->analyzePath($f);
+    $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+    check('порожній числовий for (for_numeric_statement) знайдено', count($eb) === 1);
+    rrmdir(dirname($f));
+
+    $f = tempJsFile('lua', "function f(t)\n  for k, v in pairs(t) do\n  end\nend\n");
+    $findings = $luaAnalyzer->analyzePath($f);
+    $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+    check('порожній generic for-in знайдено', count($eb) === 1);
+    rrmdir(dirname($f));
+
+    $f = tempJsFile('lua', "function f()\n  repeat\n  until true\nend\n");
+    $findings = $luaAnalyzer->analyzePath($f);
+    $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+    check('порожній repeat-until (мапиться на Do) знайдено', count($eb) === 1);
+    rrmdir(dirname($f));
+
+    // "do ... end" у Lua - НЕ цикл (на відміну від решти мов, де
+    // do_statement завжди do-while), а простий скоуп-блок, типово для
+    // раннього return. Порожній "do end" НЕ повинен ловитись
+    // empty-block (не рахується керуючою конструкцією взагалі), і код
+    // ПІСЛЯ такого do-блоку - НЕ мертвий код (return усередині нього не
+    // "видно" зовні, це інший блок).
+    $f = tempJsFile('lua', "function f()\n  do\n  end\n  print(\"не мертвий код\")\nend\n");
+    $findings = $luaAnalyzer->analyzePath($f);
+    $eb = array_filter($findings, fn ($x) => $x->rule === 'empty-block');
+    $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+    check('порожній "do end" (не цикл) НЕ ловиться empty-block', count($eb) === 0);
+    check('код після "do end" НЕ вважається мертвим (return у ньому - інший блок)', count($dead) === 0);
+    rrmdir(dirname($f));
+
+    $f = tempJsFile('lua', "function f(x)\n  do\n    return x\n  end\n  print(\"насправді недосяжно, але це інший блок - правило про це навмисно мовчить\")\nend\n");
+    $findings = $luaAnalyzer->analyzePath($f);
+    $dead = array_filter($findings, fn ($x) => $x->rule === 'dead-code-after-return');
+    check('return усередині "do end" НЕ породжує хибний dead-code-after-return для коду після блоку', count($dead) === 0);
+    rrmdir(dirname($f));
+
+    // Доказ, ЧОМУ 'dead' => null у $cFamilyCases для Lua вище: код одразу
+    // після return у тому самому блоці - не просто стиль, а реальна
+    // синтаксична помилка мови (return зобов'язаний бути останнім
+    // стейтментом блоку) - Lua ловить це на етапі парсингу сам, без
+    // допомоги лінтера.
+    $f = tempJsFile('lua', "function f(x)\n  return 1\n  dead()\nend\n");
+    $findings = $luaAnalyzer->analyzePath($f);
+    $parseErr = array_filter($findings, fn ($x) => $x->rule === 'parse-error');
+    check('код одразу після return у тому самому блоці - синтаксична помилка Lua, не стиль (мова сама це забороняє)', count($parseErr) === 1);
+    rrmdir(dirname($f));
 }
 
 echo "\n======================================\n";

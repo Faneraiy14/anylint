@@ -31,12 +31,15 @@ final class TodoTrackerRule implements Rule
             // (напр. "todo-tracker") теж спрацьовував би, як ловиться на
             // самому цьому файлі.
             //
-            // (?<!https?:) - без цього рядок $url = "http://TODO.example.com"
+            // (?<!http:)(?<!https:) - без цього рядок $url = "http://TODO.example.com"
             // теж давав знахідку: текстовий (не-AST) скан бачить "//"
             // одразу перед "TODO" й не може відрізнити справжній коментар
             // від "//", що просто трапилось усередині URL у рядковому
-            // літералі.
-            if (preg_match('~(?<!https?:)(?://|#|/\*|--)\s*(TODO|FIXME)\b[:\s]*(.*)~i', $line, $m) === 1) {
+            // літералі. Два ОКРЕМІ lookbehind ("http:" і "https:" кожен
+            // окремо), а не один "(?<!https?:)" - PCRE вимагає, щоб
+            // lookbehind мав фіксовану довжину, а "https?:" - то 5, то 6
+            // символів; окремо кожен варіант уже фіксованої довжини.
+            if (preg_match('~(?<!http:)(?<!https:)(?://|#|/\*|--)\s*(TODO|FIXME)\b[:\s]*(.*)~i', $line, $m) === 1) {
                 $note = trim($m[2]);
                 $findings[] = new Finding(
                     $filePath,

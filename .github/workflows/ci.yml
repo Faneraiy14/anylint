@@ -44,7 +44,7 @@ jobs:
         working-directory: tools/treesitter-ast-dump
 
       - name: Run test suite
-        run: php tests/run.php
+        run: composer test
 
       - name: PHPStan (level max)
         run: vendor/bin/phpstan analyse --no-progress
@@ -67,4 +67,4 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
       - name: Run test suite
-        run: php tests/run.php
+        run: composer test

@@ -89,7 +89,7 @@ src/
   Providers/AbstractTreeSitterProvider.php — спільний запуск tools/treesitter-ast-dump/dump.js -> канонічне дерево
   Providers/CProvider.php, CppProvider.php, CSharpProvider.php, JavaProvider.php,
     PythonProvider.php, RustProvider.php, SwiftProvider.php, GoProvider.php,
-    KotlinProvider.php, RubyProvider.php, DartProvider.php, ZigProvider.php,
+    KotlinProvider.php, LuaProvider.php, RubyProvider.php, DartProvider.php, ZigProvider.php,
     ObjectiveCProvider.php, SolidityProvider.php — розширення файлів + мова tree-sitter для AbstractTreeSitterProvider
 tools/js-ast-dump/dump.js          — TypeScript compiler API -> та сама канонічна JSON-схема, що й "nx ast"
 tools/treesitter-ast-dump/dump.js  — tree-sitter (15 мов, LANG_CONFIG) -> та сама канонічна JSON-схема

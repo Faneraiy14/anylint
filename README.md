@@ -89,10 +89,10 @@ src/
   Providers/AbstractTreeSitterProvider.php — shared launch of tools/treesitter-ast-dump/dump.js -> canonical tree
   Providers/CProvider.php, CppProvider.php, CSharpProvider.php, JavaProvider.php,
     PythonProvider.php, RustProvider.php, SwiftProvider.php, GoProvider.php,
-    KotlinProvider.php, RubyProvider.php, DartProvider.php, ZigProvider.php,
+    KotlinProvider.php, LuaProvider.php, RubyProvider.php, DartProvider.php, ZigProvider.php,
     ObjectiveCProvider.php, SolidityProvider.php — file extensions + tree-sitter language for AbstractTreeSitterProvider
 tools/js-ast-dump/dump.js          — TypeScript compiler API -> the same canonical JSON schema as "nx ast"
-tools/treesitter-ast-dump/dump.js  — tree-sitter (14 languages, LANG_CONFIG) -> the same canonical JSON schema
+tools/treesitter-ast-dump/dump.js  — tree-sitter (15 languages, LANG_CONFIG) -> the same canonical JSON schema
   Rules/*                — the rules themselves
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (for --checkstyle)
   Analyzer.php            — file traversal, provider selection, running the rules

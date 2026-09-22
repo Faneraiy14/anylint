@@ -7,7 +7,11 @@ namespace Tests;
 use AnyLint\Analyzer;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
+use AnyLint\Rules\DeepNestingRule;
+use AnyLint\Rules\EmptyBlockRule;
 use AnyLint\Rules\EmptyCatchRule;
+use AnyLint\Rules\EmptyFunctionRule;
+use AnyLint\Rules\LongFunctionRule;
 use AnyLint\Rules\TodoTrackerRule;
 
 /**
@@ -44,7 +48,11 @@ final class NyxilumProviderTest extends AnalyzerTestCase
         return (new Analyzer())
             ->withProvider(new NyxilumProvider(self::$nxExe))
             ->withRule(new DeadCodeAfterReturnRule())
+            ->withRule(new DeepNestingRule())
+            ->withRule(new EmptyBlockRule())
             ->withRule(new EmptyCatchRule())
+            ->withRule(new EmptyFunctionRule())
+            ->withRule(new LongFunctionRule())
             ->withRule(new TodoTrackerRule());
     }
 
@@ -74,5 +82,66 @@ final class NyxilumProviderTest extends AnalyzerTestCase
         $f = $this->tempFile('nx', "func f() {\n    return 1\n}\n");
         $dead = $this->findingsFor($this->analyzer()->analyzePath($f), 'dead-code-after-return');
         $this->assertCount(0, $dead);
+    }
+
+    /**
+     * Ці чотири правила (deep-nesting/empty-block/empty-function/
+     * long-function) НЕ мали жодного .nx-тесту дотепер, хоча канонічний
+     * AST-місток (AstJsonDumper.cs, NyxilumLang) уже давно видає все
+     * потрібне для них - If/While/FunctionDecl/Block з правильною
+     * вкладеністю й лічильником стейтментів, той самий формат, що й
+     * PhpProvider. Додано зараз (22.09.2026), щоб реально перевірити
+     * живцем, а не просто припустити, що "мала б спрацювати".
+     */
+    public function testDeepNestingCatchesNx(): void
+    {
+        $f = $this->tempFile('nx', <<<'NX'
+            func f() {
+                if (true) {
+                    if (true) {
+                        if (true) {
+                            if (true) {
+                                if (true) {
+                                    print("занадто глибоко")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            NX);
+        $deep = $this->findingsFor($this->analyzer()->analyzePath($f), 'deep-nesting');
+        $this->assertCount(1, $deep);
+    }
+
+    public function testEmptyBlockCatchesNx(): void
+    {
+        $f = $this->tempFile('nx', "func f() {\n    if (true) {\n    }\n}\n");
+        $empty = $this->findingsFor($this->analyzer()->analyzePath($f), 'empty-block');
+        $this->assertCount(1, $empty);
+    }
+
+    public function testEmptyFunctionCatchesNx(): void
+    {
+        $f = $this->tempFile('nx', "func emptyFn() {\n}\n");
+        $empty = $this->findingsFor($this->analyzer()->analyzePath($f), 'empty-function');
+        $this->assertCount(1, $empty);
+    }
+
+    public function testLongFunctionCatchesNx(): void
+    {
+        $body = implode("\n", array_map(static fn (int $i) => "    print(\"{$i}\")", range(1, 31)));
+        $f = $this->tempFile('nx', "func f() {\n{$body}\n}\n");
+        $long = $this->findingsFor($this->analyzer()->analyzePath($f), 'long-function');
+        $this->assertCount(1, $long);
+    }
+
+    public function testShallowShortNonEmptyNxHasNoFalsePositiveOnAnyOfTheFour(): void
+    {
+        $f = $this->tempFile('nx', "func f() {\n    if (true) {\n        print(\"ок\")\n    }\n}\n");
+        $findings = $this->analyzer()->analyzePath($f);
+        foreach (['deep-nesting', 'empty-block', 'empty-function', 'long-function'] as $rule) {
+            $this->assertCount(0, $this->findingsFor($findings, $rule), "неочікувана знахідка '{$rule}'");
+        }
     }
 }

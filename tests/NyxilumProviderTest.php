@@ -128,6 +128,47 @@ final class NyxilumProviderTest extends AnalyzerTestCase
         $this->assertCount(1, $empty);
     }
 
+    /**
+     * Регрес: struct-методи парсяться в Parser.cs напряму через
+     * ParseFunctionDeclaration(), в обхід ParseStatement() (де стоїть
+     * єдиний центральний штамп .Line = token.Line) - тож FunctionDecl
+     * для КОЖНОГО методу структури видавав line=0 в 'nx ast', а
+     * GenuineEmptinessCheck::byteOffsetOfLine() трактував line<1 як
+     * "офсет невідомий" -> isGenuinelyEmpty() повертав true БЕЗ спроби
+     * прочитати сирий текст - коментар усередині тіла ігнорувався
+     * повністю, для будь-якого методу структури. Топрівневі функції не
+     * зачіпало (вони йдуть через ParseStatement, лінія проставляється
+     * нормально) - тому баг довго лишався непоміченим.
+     */
+    public function testStructMethodWithOnlyACommentIsNotFlaggedNx(): void
+    {
+        $f = $this->tempFile('nx', <<<'NX'
+            struct SilentScript {
+                tag: string
+                func update(dt, canvas) {
+                    // intentionally empty
+                }
+            }
+            NX);
+        $empty = $this->findingsFor($this->analyzer()->analyzePath($f), 'empty-function');
+        $this->assertCount(0, $empty);
+    }
+
+    /** Той самий баг мав побічний ефект: коли метод СПРАВДІ порожній, знахідка все одно репортувалась з line=0 замість реального рядка методу. */
+    public function testEmptyStructMethodReportsItsOwnLineNotZeroNx(): void
+    {
+        $f = $this->tempFile('nx', <<<'NX'
+            struct SilentScript {
+                tag: string
+                func update(dt, canvas) {
+                }
+            }
+            NX);
+        $empty = $this->findingsFor($this->analyzer()->analyzePath($f), 'empty-function');
+        $this->assertCount(1, $empty);
+        $this->assertSame(3, $empty[0]->line);
+    }
+
     public function testLongFunctionCatchesNx(): void
     {
         $body = implode("\n", array_map(static fn (int $i) => "    print(\"{$i}\")", range(1, 31)));

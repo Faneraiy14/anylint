@@ -57,6 +57,12 @@ const LANG_CONFIG = {
     // нижче (EmptyFunctionRule.IGNORED_NAMES), не тут - структурно це
     // звичайнісінький function_definition, нічим не відрізняється.
     func: ['function_definition'],
+    // "except E: pass" - pass лише задовольняє граматику (тіло блоку не
+    // може бути порожнім), семантично це той самий порожній catch, що й
+    // "catch (e) {}" у C-подібних мовах. Викидається ЛИШЕ з тіла except, не
+    // глобально: "def hook(self): pass" - звична ідіома (абстрактні методи,
+    // хуки для перевизначення), і empty-function на ній був би шумом.
+    catchNoopStmt: 'pass_statement',
   },
   rust: {
     wasm: 'tree-sitter-rust.wasm', block: 'block',
@@ -346,7 +352,19 @@ function mapNode(node, isRoot) {
     // просто не побачить жодної дитини й мовчки пропустить цей
     // найпоширеніший випадок.
     const body = findNamedChild(node, (c) => matchesBlock(c.type));
-    children = [body ? mapNode(body, false) : { type: 'Block', line, attributes: {}, children: [] }];
+    const mappedBody = body ? mapNode(body, false) : { type: 'Block', line, attributes: {}, children: [] };
+    if (cfg.catchNoopStmt) {
+      mappedBody.children = mappedBody.children.filter(
+        (c) => !(c.type === 'Other' && c.attributes.kind === cfg.catchNoopStmt),
+      );
+      // Коментар ПЕРЕД першим рядком тіла ("except E:\n    # очікувано\n
+      // pass") tree-sitter кладе прямою дитиною except_clause, а не блоку -
+      // без цього пояснений, свідомий except був би знахідкою, хоча той
+      // самий коментар усередині {} у C-подібних мовах знахідку знімає.
+      const comments = namedChildren(node).filter((c) => c.type === 'comment');
+      mappedBody.children.push(...comments.map((c) => mapNode(c, false)));
+    }
+    children = [mappedBody];
   } else if (canonicalType === 'TryCatch' && (cfg.catchBodyIsSibling || cfg.tryBodyIsFlat)) {
     children = mapTryCatchChildren(node);
   } else if (canonicalType === 'FunctionDecl') {

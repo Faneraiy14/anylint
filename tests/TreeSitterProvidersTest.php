@@ -89,9 +89,11 @@ final class TreeSitterProvidersTest extends AnalyzerTestCase
                 'class' => \AnyLint\Providers\PythonProvider::class,
                 'ext' => 'py',
                 'dead' => "def f(x):\n    if x:\n        return 1\n        dead()\n    return 0\n",
-                // Порожній except у Python - синтаксична помилка (потрібен
-                // хоча б "pass"), тож немає сенсу перевіряти empty-catch.
-                'catch' => null,
+                // Порожній except у Python - синтаксична помилка, тож
+                // "except: pass" і є Python-формою "catch (e) {}" - dump.js
+                // викидає pass з тіла except (catchNoopStmt). Варіанти з
+                // коментарями - у PythonQuirksTest.
+                'catch' => "try:\n    g()\nexcept Exception:\n    pass\n",
                 // "pass" - ЄДИНИЙ синтаксично валідний спосіб написати
                 // порожнє тіло функції в Python і це РЕАЛЬНИЙ стейтмент в
                 // AST - empty-function структурно не може спрацювати тут.

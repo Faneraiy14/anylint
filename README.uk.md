@@ -57,7 +57,11 @@ php bin/anylint src --json      # машинний формат, exit 1 якщо
 php bin/anylint src --checkstyle # Checkstyle XML — PhpStorm та інші JetBrains IDE імпортують
                                  # це нативно через File Watcher, без окремого плагіна
 php bin/anylint src --no-todo   # без todo-tracker
+php bin/anylint src --sarif     # SARIF 2.1.0 — GitHub Code Scanning, GitLab, Azure DevOps
+php bin/anylint src --fix       # застосувати автовиправлення, далі показати решту
 ```
+
+Коди виходу: `0` знахідок нема, `1` є знахідки, `2` помилка запуску чи конфігу.
 
 ## Конфігурація
 
@@ -72,7 +76,8 @@ anylint шукає `anylint.json` (або `.anylint.json`) від теки ан�
     "long-function": { "maxStatements": 50 },
     "parse-error": "warning"
   },
-  "exclude": ["generated", "src/**/*.gen.php", "legacy/old/"]
+  "exclude": ["generated", "src/**/*.gen.php", "legacy/old/"],
+  "baseline": "anylint-baseline.json"
 }
 ```
 
@@ -99,6 +104,21 @@ $legacy = deep_call(); // anylint-disable-line deep-nesting, long-function
 - `anylint-disable-next-line`, `anylint-disable-line`, `anylint-disable-file`, далі назви правил (через кому чи пробіл). Без назв - усі правила. Текст після ` -- ` - пояснення для людей.
 - Директива має стояти одразу після маркера коментаря (`//`, `#`, `/*`, `*`, `--`, `;`, `<!--`). Рядковий літерал чи речення, яке просто згадує назву директиви, нічого не робить.
 - Старий `anylint:ignore` працює й далі та приглушує всі правила на своєму рядку.
+
+## Baseline: впровадження в наявний проєкт
+
+```bash
+php bin/anylint src --generate-baseline   # прийняти всі поточні знахідки, exit 0
+php bin/anylint src                       # далі показуються лише НОВІ знахідки
+```
+
+Файл baseline — `anylint-baseline.json` поруч з `anylint.json` (або в поточній теці, якщо конфігу нема); інший шлях — `"baseline": "path.json"` у конфігу чи `--baseline <файл>`. Його варто комітити: шляхи всередині відносні до самого файлу.
+
+Знахідка впізнається за файлом, правилом і повідомленням з лічильником, а не за номером рядка (так само, як у PHPStan). Нові рядки над старою знахідкою не роблять її знову «новою», а друга така сама знахідка в тому ж файлі все одно буде показана. Шлях `baseline` у конфігу, якого ще не створено, — не помилка; неіснуючий файл у `--baseline <файл>` — помилка.
+
+## Автовиправлення
+
+`--fix` застосовує всі виправлення, які правила додають до знахідок (зараз це `promotable-return-type`: перетворює `@return` з docblock на нативний тип повернення), потім аналізує ще раз і показує, що лишилось. Кількість виправлень іде в stderr, тож `--fix --json`/`--fix --sarif` лишаються машинними форматами. Правки застосовуються з кінця файлу; якщо дві правки перетинаються, застосовується лише одна, а наступний запуск `--fix` підхопить іншу.
 
 ## Що вже ловить
 
@@ -136,6 +156,8 @@ tools/js-ast-dump/dump.js          — TypeScript compiler API -> та сама 
 tools/treesitter-ast-dump/dump.js  — tree-sitter (15 мов, LANG_CONFIG) -> та сама канонічна JSON-схема
   Rules/*                — самі правила
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (для --checkstyle)
+  Formatters/SarifFormatter.php — Finding[] -> SARIF 2.1.0 (для --sarif)
+  Baseline.php, Fixer.php — --generate-baseline/--baseline, --fix
   Config.php, PathMatcher.php — завантаження/перевірка anylint.json, glob-и exclude
   Suppressions.php        — директиви anylint-disable-*, застосовуються централізовано для всіх правил
   Analyzer.php            — обхід файлів, вибір провайдера, запуск правил

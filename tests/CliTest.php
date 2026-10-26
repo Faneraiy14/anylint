@@ -93,4 +93,49 @@ final class CliTest extends AnalyzerTestCase
         [$exitCode] = $this->runCli([$dir, "--config={$dir}/bad.json"]);
         $this->assertSame(2, $exitCode);
     }
+
+    public function testGenerateBaselineThenOnlyNewFindingsFail(): void
+    {
+        $dir = $this->tempDir();
+        file_put_contents("{$dir}/a.php", "<?php\n// TODO: old\n");
+        file_put_contents("{$dir}/anylint.json", '{"baseline": "anylint-baseline.json"}');
+
+        [$exitCode] = $this->runCli([$dir, '--generate-baseline']);
+        $this->assertSame(0, $exitCode);
+        $this->assertFileExists("{$dir}/anylint-baseline.json");
+
+        [$exitCode] = $this->runCli([$dir, '--json']);
+        $this->assertSame(0, $exitCode, 'baselined finding should not fail the run');
+
+        file_put_contents("{$dir}/a.php", "<?php\n// TODO: old\n// TODO: new\n");
+        [$exitCode, $stdout] = $this->runCli([$dir, '--json']);
+        $decoded = json_decode($stdout, true);
+        $this->assertSame(1, $exitCode);
+        $this->assertIsArray($decoded);
+        $this->assertCount(1, $decoded['findings']);
+    }
+
+    public function testFixRewritesTheFileAndKeepsStdoutMachineReadable(): void
+    {
+        $f = $this->tempPhpFile("class C {\n/**\n * @return string\n */\nfunction a() { return 'a'; }\n}");
+
+        [$exitCode, $stdout] = $this->runCli([$f, '--fix', '--json']);
+
+        $this->assertSame(0, $exitCode);
+        $decoded = json_decode($stdout, true);
+        $this->assertIsArray($decoded);
+        $this->assertTrue($decoded['ok']);
+        $this->assertStringContainsString('function a(): string {', (string) file_get_contents($f));
+    }
+
+    public function testSarifOutput(): void
+    {
+        $f = $this->tempPhpFile("// TODO: x\n");
+        [$exitCode, $stdout] = $this->runCli([$f, '--sarif']);
+        $decoded = json_decode($stdout, true);
+
+        $this->assertSame(1, $exitCode);
+        $this->assertIsArray($decoded);
+        $this->assertSame('todo-tracker', $decoded['runs'][0]['results'][0]['ruleId']);
+    }
 }

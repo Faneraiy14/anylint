@@ -6,9 +6,12 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
+use AnyLint\Baseline;
 use AnyLint\Config;
 use AnyLint\Finding;
+use AnyLint\Fixer;
 use AnyLint\Formatters\CheckstyleFormatter;
+use AnyLint\Formatters\SarifFormatter;
 use AnyLint\Providers\CProvider;
 use AnyLint\Providers\CppProvider;
 use AnyLint\Providers\CSharpProvider;
@@ -44,41 +47,56 @@ use AnyLint\Severity;
 $args = array_slice($argv, 1);
 
 if (in_array('--help', $args, true) || $args === []) {
-    echo "anylint <шлях> [--json] [--checkstyle] [--no-todo] [--config <файл>] [--no-config]\n";
+    echo "anylint <шлях> [--json|--checkstyle|--sarif] [--fix] [--no-todo]\n";
+    echo "        [--config <файл>] [--no-config] [--baseline <файл>] [--generate-baseline]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
     echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go,\n";
     echo "        Kotlin, Lua, Ruby, Dart, Zig, Objective-C, Solidity.\n";
     echo "  --checkstyle: вивід у форматі Checkstyle XML (File Watcher у PhpStorm та інших IDE\n";
     echo "                вміє імпортувати цей формат нативно, без окремого плагіна).\n";
+    echo "  --sarif:      SARIF 2.1.0 (GitHub Code Scanning, GitLab, Azure DevOps).\n";
+    echo "  --fix:        застосувати автовиправлення, далі показати те, що лишилось.\n";
     echo "  --config <файл>: явний конфіг; без нього шукається anylint.json або\n";
     echo "                .anylint.json від теки шляху вгору. --no-config - не шукати.\n";
+    echo "  --baseline <файл>: не показувати знахідки, прийняті в цьому файлі\n";
+    echo "                (або \"baseline\" у конфігу).\n";
+    echo "  --generate-baseline: записати всі поточні знахідки в baseline і вийти з 0.\n";
     exit(0);
 }
 
 $json = in_array('--json', $args, true);
 $checkstyle = in_array('--checkstyle', $args, true);
+$sarif = in_array('--sarif', $args, true);
+$fix = in_array('--fix', $args, true);
 $noTodo = in_array('--no-todo', $args, true);
 $noConfig = in_array('--no-config', $args, true);
-$configFile = null;
+$generateBaseline = in_array('--generate-baseline', $args, true);
+
+/** @var array<string, string|null> $values опції зі значенням: --name <v> або --name=<v> */
+$values = ['--config' => null, '--baseline' => null];
 $path = null;
 for ($i = 0; $i < count($args); $i++) {
     $arg = $args[$i];
-    if ($arg === '--config') {
-        $configFile = $args[++$i] ?? null;
-        if ($configFile === null) {
-            fwrite(STDERR, "--config потребує шляху до файлу.\n");
+    if (array_key_exists($arg, $values)) {
+        $value = $args[++$i] ?? null;
+        if ($value === null) {
+            fwrite(STDERR, "{$arg} потребує шляху до файлу.\n");
             exit(2);
         }
+        $values[$arg] = $value;
         continue;
     }
-    if (str_starts_with($arg, '--config=')) {
-        $configFile = substr($arg, strlen('--config='));
-        continue;
+    foreach (array_keys($values) as $name) {
+        if (str_starts_with($arg, $name . '=')) {
+            $values[$name] = substr($arg, strlen($name) + 1);
+            continue 2;
+        }
     }
     if ($path === null && !str_starts_with($arg, '--')) {
         $path = $arg;
     }
 }
+$configFile = $values['--config'];
 if ($path === null) {
     fwrite(STDERR, "Не вказано шлях для аналізу.\n");
     exit(2);
@@ -138,9 +156,41 @@ try {
         $analyzer->withConfig($config);
     }
     $findings = $analyzer->analyzePath($path);
+
+    if ($fix) {
+        // Повідомлення - у stderr, щоб не зламати --json/--sarif у stdout.
+        // Після правок аналізуємо ще раз: зсуви інших знахідок уже не ті, а
+        // показати треба саме те, що лишилось.
+        $fixed = Fixer::apply($findings);
+        fwrite(STDERR, "Виправлено автоматично: {$fixed}\n");
+        if ($fixed > 0) {
+            $findings = $analyzer->analyzePath($path);
+        }
+    }
+
+    $baselineFile = $values['--baseline'] ?? $config?->baseline;
+    if ($generateBaseline) {
+        $baselineFile ??= ($config !== null ? $config->baseDir : (getcwd() ?: ".")) . DIRECTORY_SEPARATOR . 'anylint-baseline.json';
+        $baseline = Baseline::fromFindings($findings, dirname($baselineFile));
+        $baseline->save($baselineFile);
+        fwrite(STDERR, "Baseline записано: {$baselineFile} ({$baseline->count()} знахідок)\n");
+        exit(0);
+    }
+    if ($baselineFile !== null) {
+        // Baseline з конфігу, якого ще не створено, - не помилка: проєкт
+        // міг прописати шлях наперед, а --generate-baseline ще не запускали.
+        if ($values['--baseline'] !== null || is_file($baselineFile)) {
+            $findings = Baseline::fromFile($baselineFile)->filter($findings);
+        }
+    }
 } catch (\RuntimeException $e) {
     fwrite(STDERR, $e->getMessage() . "\n");
     exit(2);
+}
+
+if ($sarif) {
+    echo SarifFormatter::format($findings, getcwd() ?: '.');
+    exit($findings === [] ? 0 : 1);
 }
 
 if ($checkstyle) {

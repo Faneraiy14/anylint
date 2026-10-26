@@ -57,7 +57,11 @@ php bin/anylint src --json      # machine-readable format, exit 1 if there are f
 php bin/anylint src --checkstyle # Checkstyle XML — PhpStorm/other JetBrains IDEs import this
                                  # natively via a File Watcher, no custom plugin needed
 php bin/anylint src --no-todo   # skip the todo-tracker
+php bin/anylint src --sarif     # SARIF 2.1.0 — GitHub Code Scanning, GitLab, Azure DevOps
+php bin/anylint src --fix       # apply auto-fixes, then report what is left
 ```
+
+Exit codes: `0` no findings, `1` findings, `2` usage/config error.
 
 ## Configuration
 
@@ -72,7 +76,8 @@ anylint looks for `anylint.json` (or `.anylint.json`) starting from the analyzed
     "long-function": { "maxStatements": 50 },
     "parse-error": "warning"
   },
-  "exclude": ["generated", "src/**/*.gen.php", "legacy/old/"]
+  "exclude": ["generated", "src/**/*.gen.php", "legacy/old/"],
+  "baseline": "anylint-baseline.json"
 }
 ```
 
@@ -99,6 +104,21 @@ $legacy = deep_call(); // anylint-disable-line deep-nesting, long-function
 - `anylint-disable-next-line`, `anylint-disable-line`, `anylint-disable-file`, followed by rule names (comma or space separated). No rule names = all rules. Text after ` -- ` is a reason for humans.
 - The directive must come right after a comment marker (`//`, `#`, `/*`, `*`, `--`, `;`, `<!--`). A string literal or a sentence that merely mentions the directive's name does nothing.
 - The older `anylint:ignore` still works and silences every rule on its line.
+
+## Baseline: adopting anylint in an existing project
+
+```bash
+php bin/anylint src --generate-baseline   # accept every current finding, exit 0
+php bin/anylint src                       # from now on, only NEW findings are reported
+```
+
+The baseline file is `anylint-baseline.json` next to `anylint.json` (or in the current directory without a config); set `"baseline": "path.json"` in the config or pass `--baseline <file>` to choose another. Commit it: paths inside are relative to the baseline file.
+
+A finding is matched by file, rule and message, with a count — not by line number (the same approach as PHPStan). Adding lines above an old finding doesn't make it "new" again, but a second identical finding in the same file is still reported. A `baseline` path in the config that doesn't exist yet is fine; `--baseline <file>` that doesn't exist is an error.
+
+## Auto-fix
+
+`--fix` applies every fix that rules attach to findings (today: `promotable-return-type`, which turns a `@return` docblock into a native return type), then re-analyzes and reports what is left. The number of applied fixes goes to stderr, so `--fix --json`/`--fix --sarif` stay machine-readable. Fixes are applied from the end of the file backwards; if two fixes overlap, only one is applied, and the next `--fix` run picks up the other.
 
 ## What it catches today
 
@@ -136,6 +156,8 @@ tools/js-ast-dump/dump.js          — TypeScript compiler API -> the same canon
 tools/treesitter-ast-dump/dump.js  — tree-sitter (15 languages, LANG_CONFIG) -> the same canonical JSON schema
   Rules/*                — the rules themselves
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (for --checkstyle)
+  Formatters/SarifFormatter.php — Finding[] -> SARIF 2.1.0 (for --sarif)
+  Baseline.php, Fixer.php — --generate-baseline/--baseline, --fix
   Config.php, PathMatcher.php — anylint.json loading/validation, exclude globs
   Suppressions.php        — anylint-disable-* comment directives, applied centrally for every rule
   Analyzer.php            — file traversal, provider selection, running the rules

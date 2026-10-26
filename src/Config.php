@@ -16,7 +16,8 @@ namespace AnyLint;
  *       "empty-catch": "error",
  *       "deep-nesting": { "severity": "warning", "maxDepth": 3 }
  *     },
- *     "exclude": ["generated", "legacy/**\/*.php"]
+ *     "exclude": ["generated", "legacy/**\/*.php"],
+ *     "baseline": "anylint-baseline.json"
  *   }
  *
  * Значення правила - або рядок severity ("off"/"info"/"warning"/"error"),
@@ -35,6 +36,7 @@ final class Config
      * @param array<string, Severity|null> $severities null = правило вимкнено ("off")
      * @param array<string, array<string, mixed>> $options опції правил (без ключа "severity")
      * @param list<string> $exclude glob-шаблони відносно $baseDir
+     * @param string|null $baseline шлях до файлу baseline (вже відносно $baseDir розв'язаний)
      */
     public function __construct(
         public readonly string $baseDir,
@@ -42,6 +44,7 @@ final class Config
         public readonly array $options = [],
         public readonly array $exclude = [],
         public readonly string $source = '(вбудований)',
+        public readonly ?string $baseline = null,
     ) {
     }
 
@@ -96,8 +99,8 @@ final class Config
     {
         foreach (array_keys($data) as $key) {
             // "$schema" - для майбутньої JSON Schema в редакторах, не помилка.
-            if (!in_array($key, ['rules', 'exclude', '$schema'], true)) {
-                throw new \RuntimeException("{$source}: невідомий ключ '{$key}' (дозволено: rules, exclude).");
+            if (!in_array($key, ['rules', 'exclude', 'baseline', '$schema'], true)) {
+                throw new \RuntimeException("{$source}: невідомий ключ '{$key}' (дозволено: rules, exclude, baseline).");
             }
         }
 
@@ -146,12 +149,25 @@ final class Config
             $patterns[] = $pattern;
         }
 
-        return new self($baseDir, $severities, $options, $patterns, $source);
+        $baseline = $data['baseline'] ?? null;
+        if ($baseline !== null && (!is_string($baseline) || trim($baseline) === '')) {
+            throw new \RuntimeException("{$source}: 'baseline' має бути шляхом до файлу.");
+        }
+        if (is_string($baseline) && !self::isAbsolute($baseline)) {
+            $baseline = $baseDir . DIRECTORY_SEPARATOR . $baseline;
+        }
+
+        return new self($baseDir, $severities, $options, $patterns, $source, $baseline);
     }
 
     public function isDisabled(string $rule): bool
     {
         return array_key_exists($rule, $this->severities) && $this->severities[$rule] === null;
+    }
+
+    private static function isAbsolute(string $path): bool
+    {
+        return str_starts_with($path, '/') || str_starts_with($path, '\\') || preg_match('~^[A-Za-z]:[\\\\/]~', $path) === 1;
     }
 
     private static function parseSeverity(string $value, string $where): ?Severity

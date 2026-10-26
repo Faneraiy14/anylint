@@ -6,7 +6,7 @@ namespace AnyLint\Rules;
 
 use AnyLint\Ast\Node;
 use AnyLint\Finding;
-use AnyLint\Rule;
+use AnyLint\ConfigurableRule;
 use AnyLint\Severity;
 
 /**
@@ -15,12 +15,31 @@ use AnyLint\Severity;
  * одне. CatchClause навмисно не рахується окремо від свого TryCatch - це
  * одна конструкція, а не два рівні вкладеності.
  */
-final class DeepNestingRule implements Rule
+final class DeepNestingRule implements ConfigurableRule
 {
-    private const MAX_DEPTH = 4;
+    private const DEFAULT_MAX_DEPTH = 4;
 
     /** @var list<string> */
     private const CONTROL_TYPES = ['If', 'For', 'Foreach', 'While', 'Do', 'TryCatch'];
+
+    public function __construct(private readonly int $maxDepth = self::DEFAULT_MAX_DEPTH)
+    {
+    }
+
+    public function withOptions(array $options): static
+    {
+        $value = $this->maxDepth;
+        foreach ($options as $name => $option) {
+            if ($name !== 'maxDepth') {
+                throw new \InvalidArgumentException("невідома опція '{$name}' (є лише maxDepth).");
+            }
+            if (!is_int($option) || $option < 1) {
+                throw new \InvalidArgumentException('maxDepth має бути цілим числом >= 1.');
+            }
+            $value = $option;
+        }
+        return new static($value);
+    }
 
     public function name(): string
     {
@@ -40,7 +59,7 @@ final class DeepNestingRule implements Rule
         $isControl = in_array($node->type, self::CONTROL_TYPES, true);
         $nextDepth = $isControl ? $depth + 1 : $depth;
 
-        if ($isControl && $nextDepth > self::MAX_DEPTH) {
+        if ($isControl && $nextDepth > $this->maxDepth) {
             $findings[] = new Finding(
                 $filePath,
                 $node->line,
@@ -49,7 +68,7 @@ final class DeepNestingRule implements Rule
                 sprintf(
                     'Вкладеність керуючих конструкцій - %d рівнів (більше %d) - важко читати й тестувати.',
                     $nextDepth,
-                    self::MAX_DEPTH,
+                    $this->maxDepth,
                 ),
             );
         }

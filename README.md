@@ -59,6 +59,47 @@ php bin/anylint src --checkstyle # Checkstyle XML — PhpStorm/other JetBrains I
 php bin/anylint src --no-todo   # skip the todo-tracker
 ```
 
+## Configuration
+
+anylint looks for `anylint.json` (or `.anylint.json`) starting from the analyzed path's directory and walking up to the filesystem root, so running it from any subdirectory picks up the project's config. `--config <file>` points at one explicitly, `--no-config` skips the lookup.
+
+```json
+{
+  "rules": {
+    "todo-tracker": "off",
+    "empty-catch": "error",
+    "deep-nesting": { "severity": "warning", "maxDepth": 3 },
+    "long-function": { "maxStatements": 50 },
+    "parse-error": "warning"
+  },
+  "exclude": ["generated", "src/**/*.gen.php", "legacy/old/"]
+}
+```
+
+- A rule's value is a severity (`off`, `info`, `warning`, `error`) or an object with an optional `severity` plus that rule's options. Today `deep-nesting` (`maxDepth`, default 4) and `long-function` (`maxStatements`, default 30) take options.
+- `parse-error` and `unreadable-file` (findings the analyzer emits itself) can be overridden too, e.g. when `nx`/`node` isn't installed on a machine.
+- `exclude` uses `.gitignore`-like globs relative to the config file: a pattern without `/` matches a file or directory name at any depth; a pattern with `/` matches a path from the config's directory (and everything under it); `*`, `**`, `?` work as usual. The built-in skip list (`vendor`, `node_modules`, `dist`, ...) still applies.
+- Unknown rule names, unknown options and bad values are an error (exit code 2), not silently ignored: a typo would otherwise look like a setting that took effect.
+
+## Suppressing findings
+
+The same comment directives work for every rule and every language, because they are read from the raw file text, not the AST:
+
+```php
+// anylint-disable-next-line empty-catch -- intentionally swallowed, see #42
+try { flush(); } catch (\Throwable $e) {}
+
+$legacy = deep_call(); // anylint-disable-line deep-nesting, long-function
+```
+
+```python
+# anylint-disable-file todo-tracker
+```
+
+- `anylint-disable-next-line`, `anylint-disable-line`, `anylint-disable-file`, followed by rule names (comma or space separated). No rule names = all rules. Text after ` -- ` is a reason for humans.
+- The directive must come right after a comment marker (`//`, `#`, `/*`, `*`, `--`, `;`, `<!--`). A string literal or a sentence that merely mentions the directive's name does nothing.
+- The older `anylint:ignore` still works and silences every rule on its line.
+
 ## What it catches today
 
 | Rule | Type | What it finds |
@@ -95,6 +136,8 @@ tools/js-ast-dump/dump.js          — TypeScript compiler API -> the same canon
 tools/treesitter-ast-dump/dump.js  — tree-sitter (15 languages, LANG_CONFIG) -> the same canonical JSON schema
   Rules/*                — the rules themselves
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (for --checkstyle)
+  Config.php, PathMatcher.php — anylint.json loading/validation, exclude globs
+  Suppressions.php        — anylint-disable-* comment directives, applied centrally for every rule
   Analyzer.php            — file traversal, provider selection, running the rules
 bin/anylint                — the CLI
 ```

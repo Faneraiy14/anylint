@@ -4,13 +4,6 @@ declare(strict_types=1);
 
 namespace AnyLint;
 
-enum Severity: string
-{
-    case Info = 'info';
-    case Warning = 'warning';
-    case Error = 'error';
-}
-
 /**
  * @phpstan-type FixData array{startOffset: int, endOffset: int, replacement: string}
  */
@@ -30,5 +23,10 @@ final class Finding
         public readonly string $message,
         public readonly ?array $fix = null,
     ) {
+    }
+
+    public function withSeverity(Severity $severity): self
+    {
+        return new self($this->file, $this->line, $this->rule, $severity, $this->message, $this->fix);
     }
 }

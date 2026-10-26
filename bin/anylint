@@ -6,6 +6,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use AnyLint\Analyzer;
+use AnyLint\Config;
 use AnyLint\Finding;
 use AnyLint\Formatters\CheckstyleFormatter;
 use AnyLint\Providers\CProvider;
@@ -43,23 +44,39 @@ use AnyLint\Severity;
 $args = array_slice($argv, 1);
 
 if (in_array('--help', $args, true) || $args === []) {
-    echo "anylint <шлях> [--json] [--checkstyle] [--no-todo]\n";
+    echo "anylint <шлях> [--json] [--checkstyle] [--no-todo] [--config <файл>] [--no-config]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
     echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go,\n";
     echo "        Kotlin, Lua, Ruby, Dart, Zig, Objective-C, Solidity.\n";
     echo "  --checkstyle: вивід у форматі Checkstyle XML (File Watcher у PhpStorm та інших IDE\n";
     echo "                вміє імпортувати цей формат нативно, без окремого плагіна).\n";
+    echo "  --config <файл>: явний конфіг; без нього шукається anylint.json або\n";
+    echo "                .anylint.json від теки шляху вгору. --no-config - не шукати.\n";
     exit(0);
 }
 
 $json = in_array('--json', $args, true);
 $checkstyle = in_array('--checkstyle', $args, true);
 $noTodo = in_array('--no-todo', $args, true);
+$noConfig = in_array('--no-config', $args, true);
+$configFile = null;
 $path = null;
-foreach ($args as $arg) {
-    if (!str_starts_with($arg, '--')) {
+for ($i = 0; $i < count($args); $i++) {
+    $arg = $args[$i];
+    if ($arg === '--config') {
+        $configFile = $args[++$i] ?? null;
+        if ($configFile === null) {
+            fwrite(STDERR, "--config потребує шляху до файлу.\n");
+            exit(2);
+        }
+        continue;
+    }
+    if (str_starts_with($arg, '--config=')) {
+        $configFile = substr($arg, strlen('--config='));
+        continue;
+    }
+    if ($path === null && !str_starts_with($arg, '--')) {
         $path = $arg;
-        break;
     }
 }
 if ($path === null) {
@@ -112,6 +129,14 @@ if (!$noTodo) {
 }
 
 try {
+    $config = match (true) {
+        $configFile !== null => Config::fromFile($configFile),
+        $noConfig => null,
+        default => Config::discover($path),
+    };
+    if ($config !== null) {
+        $analyzer->withConfig($config);
+    }
     $findings = $analyzer->analyzePath($path);
 } catch (\RuntimeException $e) {
     fwrite(STDERR, $e->getMessage() . "\n");

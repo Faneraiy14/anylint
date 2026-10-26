@@ -59,6 +59,47 @@ php bin/anylint src --checkstyle # Checkstyle XML — PhpStorm та інші Jet
 php bin/anylint src --no-todo   # без todo-tracker
 ```
 
+## Конфігурація
+
+anylint шукає `anylint.json` (або `.anylint.json`) від теки аналізованого шляху вгору до кореня файлової системи, тож запуск з будь-якої підтеки бере конфіг проєкту. `--config <файл>` задає його явно, `--no-config` вимикає пошук.
+
+```json
+{
+  "rules": {
+    "todo-tracker": "off",
+    "empty-catch": "error",
+    "deep-nesting": { "severity": "warning", "maxDepth": 3 },
+    "long-function": { "maxStatements": 50 },
+    "parse-error": "warning"
+  },
+  "exclude": ["generated", "src/**/*.gen.php", "legacy/old/"]
+}
+```
+
+- Значення правила - severity (`off`, `info`, `warning`, `error`) або об'єкт з необов'язковим `severity` і опціями цього правила. Зараз опції мають `deep-nesting` (`maxDepth`, типово 4) і `long-function` (`maxStatements`, типово 30).
+- `parse-error` і `unreadable-file` (знахідки самого аналізатора) теж можна перевизначити - напр., коли на машині немає `nx`/`node`.
+- `exclude` - glob-шаблони на кшталт `.gitignore`, відносно файлу конфігу: шаблон без `/` збігається з назвою файлу чи теки на будь-якій глибині; шаблон зі `/` - зі шляхом від теки конфігу (і всім під ним); `*`, `**`, `?` - як зазвичай. Вбудований список пропусків (`vendor`, `node_modules`, `dist`, ...) діє й далі.
+- Невідома назва правила, невідома опція чи неприйнятне значення - помилка (код виходу 2), а не мовчазне ігнорування: інакше друкарська помилка виглядала б як налаштування, що спрацювало.
+
+## Приглушення знахідок
+
+Ті самі коментарі-директиви працюють для всіх правил і всіх мов, бо читаються з сирого тексту файлу, а не з AST:
+
+```php
+// anylint-disable-next-line empty-catch -- свідомо ковтаємо, див. #42
+try { flush(); } catch (\Throwable $e) {}
+
+$legacy = deep_call(); // anylint-disable-line deep-nesting, long-function
+```
+
+```python
+# anylint-disable-file todo-tracker
+```
+
+- `anylint-disable-next-line`, `anylint-disable-line`, `anylint-disable-file`, далі назви правил (через кому чи пробіл). Без назв - усі правила. Текст після ` -- ` - пояснення для людей.
+- Директива має стояти одразу після маркера коментаря (`//`, `#`, `/*`, `*`, `--`, `;`, `<!--`). Рядковий літерал чи речення, яке просто згадує назву директиви, нічого не робить.
+- Старий `anylint:ignore` працює й далі та приглушує всі правила на своєму рядку.
+
 ## Що вже ловить
 
 | Правило | Тип | Що знаходить |
@@ -95,6 +136,8 @@ tools/js-ast-dump/dump.js          — TypeScript compiler API -> та сама 
 tools/treesitter-ast-dump/dump.js  — tree-sitter (15 мов, LANG_CONFIG) -> та сама канонічна JSON-схема
   Rules/*                — самі правила
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (для --checkstyle)
+  Config.php, PathMatcher.php — завантаження/перевірка anylint.json, glob-и exclude
+  Suppressions.php        — директиви anylint-disable-*, застосовуються централізовано для всіх правил
   Analyzer.php            — обхід файлів, вибір провайдера, запуск правил
 bin/anylint                — CLI
 ```

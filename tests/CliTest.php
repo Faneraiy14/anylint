@@ -66,4 +66,31 @@ final class CliTest extends AnalyzerTestCase
         $this->assertIsArray($decoded, '--json should return valid JSON, not an empty string');
         $this->assertCount(1, $decoded['findings']);
     }
+
+    public function testConfigFileIsDiscoveredAndCanBeBypassed(): void
+    {
+        $dir = $this->tempDir();
+        file_put_contents("{$dir}/a.php", "<?php\n// TODO: x\n");
+        file_put_contents("{$dir}/anylint.json", '{"rules": {"todo-tracker": "off"}}');
+
+        [$exitCode] = $this->runCli([$dir, '--json']);
+        $this->assertSame(0, $exitCode);
+
+        [$exitCode] = $this->runCli([$dir, '--json', '--no-config']);
+        $this->assertSame(1, $exitCode);
+    }
+
+    public function testExplicitConfigFlagAndInvalidConfigExitTwo(): void
+    {
+        $dir = $this->tempDir();
+        file_put_contents("{$dir}/a.php", "<?php\n// TODO: x\n");
+        file_put_contents("{$dir}/good.json", '{"rules": {"todo-tracker": "off"}}');
+        file_put_contents("{$dir}/bad.json", '{"rules": {"nope": "off"}}');
+
+        [$exitCode] = $this->runCli(['--config', "{$dir}/good.json", $dir, '--json']);
+        $this->assertSame(0, $exitCode);
+
+        [$exitCode] = $this->runCli([$dir, "--config={$dir}/bad.json"]);
+        $this->assertSame(2, $exitCode);
+    }
 }

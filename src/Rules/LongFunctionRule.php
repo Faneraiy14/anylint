@@ -6,7 +6,7 @@ namespace AnyLint\Rules;
 
 use AnyLint\Ast\Node;
 use AnyLint\Finding;
-use AnyLint\Rule;
+use AnyLint\ConfigurableRule;
 use AnyLint\Severity;
 
 /**
@@ -18,9 +18,28 @@ use AnyLint\Severity;
  * на одному рівні, а не глибоку вкладеність (те вже ловить
  * DeepNestingRule окремо).
  */
-final class LongFunctionRule implements Rule
+final class LongFunctionRule implements ConfigurableRule
 {
-    private const MAX_STATEMENTS = 30;
+    private const DEFAULT_MAX_STATEMENTS = 30;
+
+    public function __construct(private readonly int $maxStatements = self::DEFAULT_MAX_STATEMENTS)
+    {
+    }
+
+    public function withOptions(array $options): static
+    {
+        $value = $this->maxStatements;
+        foreach ($options as $name => $option) {
+            if ($name !== 'maxStatements') {
+                throw new \InvalidArgumentException("невідома опція '{$name}' (є лише maxStatements).");
+            }
+            if (!is_int($option) || $option < 1) {
+                throw new \InvalidArgumentException('maxStatements має бути цілим числом >= 1.');
+            }
+            $value = $option;
+        }
+        return new static($value);
+    }
 
     public function name(): string
     {
@@ -37,7 +56,7 @@ final class LongFunctionRule implements Rule
             }
 
             $count = count($body->children);
-            if ($count <= self::MAX_STATEMENTS) {
+            if ($count <= $this->maxStatements) {
                 continue;
             }
 
@@ -51,7 +70,7 @@ final class LongFunctionRule implements Rule
                     "Функція '%s' - %d стейтментів на верхньому рівні (більше %d) - варто розбити на менші.",
                     $name,
                     $count,
-                    self::MAX_STATEMENTS,
+                    $this->maxStatements,
                 ),
             );
         }

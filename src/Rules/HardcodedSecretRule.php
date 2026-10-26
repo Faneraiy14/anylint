@@ -41,9 +41,6 @@ final class HardcodedSecretRule implements Rule
         $findings = [];
         $lines = explode("\n", $source);
         foreach ($lines as $i => $line) {
-            if (str_contains($line, 'anylint:ignore')) {
-                continue;
-            }
             foreach (self::PATTERNS as $ruleName => $pattern) {
                 if (preg_match($pattern, $line, $m) === 1) {
                     $findings[] = new Finding(

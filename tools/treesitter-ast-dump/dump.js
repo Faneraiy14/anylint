@@ -30,11 +30,19 @@ const LANG_CONFIG = {
     // ще глибше для вказівників типу "int *f()") - findFunctionName()
     // нижче рекурсивно йде по полю "declarator", поки не знайде "name".
     func: ['function_definition'],
+    // "else if" = else_clause -> if_statement: розгортається до канонічного
+    // If-у-If (див. normalizeElseIfChain), інакше кожна гілка ланцюжка
+    // рахувалась би новим рівнем вкладеності.
+    elseWrapper: 'else_clause',
   },
   cpp: {
     wasm: 'tree-sitter-cpp.wasm', block: 'compound_statement',
     tryStmt: 'try_statement', catchClause: 'catch_clause', foreach: 'for_range_loop', isReturn: isReturnStatement,
     func: ['function_definition'],
+    // "else if" = else_clause -> if_statement: розгортається до канонічного
+    // If-у-If (див. normalizeElseIfChain), інакше кожна гілка ланцюжка
+    // рахувалась би новим рівнем вкладеності.
+    elseWrapper: 'else_clause',
   },
   c_sharp: {
     wasm: 'tree-sitter-c_sharp.wasm', block: 'block',
@@ -63,6 +71,9 @@ const LANG_CONFIG = {
     // глобально: "def hook(self): pass" - звична ідіома (абстрактні методи,
     // хуки для перевизначення), і empty-function на ній був би шумом.
     catchNoopStmt: 'pass_statement',
+    // elif - окремі elif_clause-сусіди всередині if_statement, а не вкладений
+    // if; перебудовуються в канонічний ланцюжок If-у-If.
+    elifClause: 'elif_clause', elseClause: 'else_clause',
   },
   rust: {
     wasm: 'tree-sitter-rust.wasm', block: 'block',
@@ -76,6 +87,10 @@ const LANG_CONFIG = {
     // глибше.
     isReturn: (n) => n.type === 'return_expression',
     func: ['function_item'],
+    // "else if" = else_clause -> if_statement: розгортається до канонічного
+    // If-у-If (див. normalizeElseIfChain), інакше кожна гілка ланцюжка
+    // рахувалась би новим рівнем вкладеності.
+    elseWrapper: 'else_clause',
   },
   swift: {
     // У Swift немає окремого вузла "блок коду" - і тіло функції, і тіло
@@ -112,6 +127,10 @@ const LANG_CONFIG = {
     // "name" узагалі (childForFieldName('name') === null) - findFunctionName()
     // тоді підхоплює перший дочірній вузол-лист (simple_identifier).
     func: ['function_declaration'],
+    // У Kotlin гілки if - обидві control_structure_body; "else if" - це
+    // ДРУГА з них з єдиним if_expression усередині. Лише друга: перша з
+    // єдиним if ("if (a) if (b) x()") - справжня вкладеність.
+    elseWrapper: 'control_structure_body', elseWrapperIsSecondBody: true,
   },
   ruby: {
     wasm: 'tree-sitter-ruby.wasm',
@@ -136,6 +155,9 @@ const LANG_CONFIG = {
     // з (можливо порожнім) тілом, тож синтезувати Block тут безпечно
     // завжди, без перевірки на '{' у тексті (якої тут і бути не може).
     funcBodyIsImplicit: true,
+    // if/unless/elsif - власні типи вузлів Ruby, не if_statement; elsif уже
+    // вкладений у попередню гілку, тож ланцюжок має канонічну форму сам.
+    ifStmt: ['if', 'unless', 'elsif'],
   },
   dart: {
     wasm: 'tree-sitter-dart.wasm', block: 'block',
@@ -167,6 +189,10 @@ const LANG_CONFIG = {
     // обгорнутий у expression_statement (return - вираз).
     isReturn: (n) => n.type === 'return_expression',
     func: ['function_declaration'],
+    // "else if" = else_clause -> if_statement: розгортається до канонічного
+    // If-у-If (див. normalizeElseIfChain), інакше кожна гілка ланцюжка
+    // рахувалась би новим рівнем вкладеності.
+    elseWrapper: 'else_clause',
   },
   objc: {
     wasm: 'tree-sitter-objc.wasm', block: 'compound_statement',
@@ -224,6 +250,7 @@ const LANG_CONFIG = {
     // Без цього прапорця EmptyBlockRule мовчки пропускав би саме
     // найпоширеніший випадок порожнього тіла.
     controlBodyIsImplicit: true,
+    elifClause: 'elseif_clause', elseClause: 'else_clause',
   },
 };
 
@@ -312,7 +339,9 @@ function mapNode(node, isRoot) {
     // Python сам foreach ("for x in ...") - це той самий тип вузла
     // for_statement, що інші мови використовують для C-стилю for.
     canonicalType = 'Foreach';
-  } else if (type === 'if_statement' || type === 'if_expression') {
+  } else if (type === 'if_statement' || type === 'if_expression' || (Array.isArray(cfg.ifStmt) && cfg.ifStmt.includes(type))) {
+    canonicalType = 'If';
+  } else if (cfg.elifClause && type === cfg.elifClause) {
     canonicalType = 'If';
   } else if (type === 'while_statement' || type === 'while_expression') {
     canonicalType = 'While';
@@ -394,6 +423,13 @@ function mapNode(node, isRoot) {
     children = [...children, { type: 'Block', line, attributes: {}, children: [] }];
   }
 
+  if (canonicalType === 'If') {
+    children = normalizeElseIfChain(children);
+  }
+  if (cfg.elifClause && type === cfg.elifClause) {
+    elifNodes.add(children);
+  }
+
   let attributes = {};
   if (canonicalType === 'Other') {
     attributes = { kind: type };
@@ -412,6 +448,57 @@ function mapNode(node, isRoot) {
     attributes,
     children,
   };
+}
+
+// Діти, що прийшли з elif_clause/elseif_clause (WeakSet, а не поле у
+// вузлі: зайве поле потрапило б у JSON-вивід).
+const elifNodes = new WeakSet();
+
+// Канонічна форма ланцюжка "if / else if / else", яку вже дають JS/TS,
+// Java, C#, Go, Dart, Swift: If[умова, Block(then), If(наступна гілка) |
+// Block(else)]. На ній тримаються DeepNestingRule (ланцюжок - не
+// вкладеність) і Metrics\Complexity. Без нормалізації той самий ланцюжок
+// давав у C/C++/Rust/Zig/Kotlin "вкладеність" на кожну гілку, а в
+// Python/Lua гілки elif узагалі не рахувались розгалуженнями.
+function normalizeElseIfChain(children) {
+  if (cfg.elseWrapper) {
+    const wrappers = children.filter((c) => c.type === 'Other' && c.attributes.kind === cfg.elseWrapper);
+    const candidate = wrappers[wrappers.length - 1];
+    if (
+      candidate
+      && (!cfg.elseWrapperIsSecondBody || wrappers.length >= 2)
+      && candidate.children.length === 1
+      && candidate.children[0].type === 'If'
+    ) {
+      children = children.map((c) => (c === candidate ? candidate.children[0] : c));
+    }
+  }
+
+  if (cfg.elifClause) {
+    const elifs = [];
+    const rest = [];
+    let elseBranch = null;
+    for (const c of children) {
+      if (c.type === 'If' && elifNodes.has(c.children)) {
+        elifs.push(c);
+      } else if (c.type === 'Other' && c.attributes.kind === cfg.elseClause) {
+        elseBranch = c.children.find((x) => x.type === 'Block') || c;
+      } else {
+        rest.push(c);
+      }
+    }
+    if (elifs.length > 0) {
+      let tail = elseBranch;
+      for (let i = elifs.length - 1; i >= 0; i--) {
+        if (tail) {
+          elifs[i].children = [...elifs[i].children, tail];
+        }
+        tail = elifs[i];
+      }
+      return [...rest, tail];
+    }
+  }
+  return children;
 }
 
 function namedChildren(node) {

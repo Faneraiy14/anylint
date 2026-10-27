@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AnyLint\Providers;
 
 use AnyLint\Ast\Node;
+use AnyLint\Ast\NodeDecoder;
 use AnyLint\ExternalToolProvider;
 
 /**
@@ -85,57 +86,27 @@ final class NyxilumProvider implements ExternalToolProvider
             throw new \RuntimeException("'{$this->nxExecutable} ast' повернув невалідний JSON для {$filePath}");
         }
 
-        return $this->toNode($decoded);
+        return NodeDecoder::decode($decoded, "'nx ast'", self::collapseElseIf(...));
     }
 
     /**
-     * Явна перевірка форми замість сліпих (string)/(int)-кастів mixed -
-     * json_decode() із $stdout зовнішнього процесу це недовірені дані:
-     * якщо колись "nx ast" видасть щось несподіване (регресія в
-     * AstJsonDumper.cs, обірваний вивід), краще зрозуміла помилка тут,
-     * ніж мовчазне (string)null -> "" чи (int)"abc" -> 0 десь глибше в
-     * дереві.
+     * "else if" у nx ast - else-гілка як синтетичний Block (line 0) з
+     * єдиним If усередині; згортаємо до канонічного If-у-If, інакше
+     * кожна гілка ланцюжка рахувалась би новим рівнем вкладеності.
      *
-     * @param array<mixed> $data
+     * @param list<Node> $children
+     * @return list<Node>
      */
-    private function toNode(array $data): Node
+    private static function collapseElseIf(string $type, array $children): array
     {
-        $type = $data['type'] ?? null;
-        if (!is_string($type)) {
-            throw new \RuntimeException("Вузол AST від 'nx ast' без рядкового поля 'type': " . json_encode($data));
+        if ($type !== 'If') {
+            return $children;
         }
-
-        $line = $data['line'] ?? null;
-        if (!is_int($line)) {
-            throw new \RuntimeException("Вузол '{$type}' від 'nx ast' без цілого поля 'line'.");
-        }
-
-        $attributesRaw = $data['attributes'] ?? [];
-        $attributes = is_array($attributesRaw) ? $this->toStringKeyedArray($attributesRaw) : [];
-
-        $children = [];
-        $childrenRaw = $data['children'] ?? [];
-        if (is_array($childrenRaw)) {
-            foreach ($childrenRaw as $child) {
-                if (is_array($child)) {
-                    $children[] = $this->toNode($child);
-                }
-            }
-        }
-
-        return new Node($type, $line, $attributes, $children);
-    }
-
-    /**
-     * @param array<mixed> $raw
-     * @return array<string, mixed>
-     */
-    private function toStringKeyedArray(array $raw): array
-    {
-        $result = [];
-        foreach ($raw as $key => $value) {
-            $result[(string) $key] = $value;
-        }
-        return $result;
+        return array_map(
+            static fn (Node $c) => $c->type === 'Block' && $c->line === 0 && count($c->children) === 1 && $c->children[0]->type === 'If'
+                ? $c->children[0]
+                : $c,
+            $children,
+        );
     }
 }

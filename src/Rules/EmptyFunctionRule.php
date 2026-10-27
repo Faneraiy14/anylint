@@ -45,7 +45,7 @@ final class EmptyFunctionRule implements Rule
     {
         $findings = [];
         foreach ($root->findAll('FunctionDecl') as $func) {
-            $body = $this->findBody($func);
+            $body = $func->body();
             if ($body === null || $body->children !== [] || !$this->isGenuinelyEmpty($func, $source)) {
                 continue;
             }
@@ -63,21 +63,5 @@ final class EmptyFunctionRule implements Rule
             );
         }
         return $findings;
-    }
-
-    /**
-     * FunctionDecl.children не завжди [тіло] - JS/TS-провайдер кладе туди
-     * ще й параметри/декоратори/типи (навмисно, щоб не пропустити
-     * замикання у дефолтних значеннях параметрів), тож тіло треба шукати
-     * за типом Block, а не брати за індексом 0.
-     */
-    private function findBody(Node $func): ?Node
-    {
-        foreach ($func->children as $child) {
-            if ($child->type === 'Block') {
-                return $child;
-            }
-        }
-        return null;
     }
 }

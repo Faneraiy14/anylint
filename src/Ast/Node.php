@@ -32,6 +32,22 @@ final class Node
     ) {
     }
 
+    /**
+     * Тіло функції. FunctionDecl.children не завжди [тіло] - JS/TS-провайдер
+     * кладе туди ще й параметри/декоратори/типи (навмисно, щоб не пропустити
+     * замикання у дефолтних значеннях параметрів), тож тіло шукається за
+     * типом Block, а не береться за індексом 0.
+     */
+    public function body(): ?Node
+    {
+        foreach ($this->children as $child) {
+            if ($child->type === 'Block') {
+                return $child;
+            }
+        }
+        return null;
+    }
+
     /** @return list<Node> */
     public function findAll(string $type): array
     {

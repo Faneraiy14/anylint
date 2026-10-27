@@ -45,7 +45,8 @@ final class SarifFormatter
                     'physicalLocation' => [
                         'artifactLocation' => ['uri' => self::uri($finding->file, $base)],
                         // SARIF вимагає startLine >= 1.
-                        'region' => ['startLine' => max(1, $finding->line)],
+                        'region' => ['startLine' => max(1, $finding->line)]
+                            + ($finding->endLine !== null ? ['endLine' => max(1, $finding->endLine)] : []),
                     ],
                 ]],
             ];

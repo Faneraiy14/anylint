@@ -65,6 +65,25 @@ php bin/anylint src --jobs auto # analyze in parallel (one process per CPU core)
 
 Exit codes: `0` no findings, `1` findings, `2` usage/config error.
 
+## Project report
+
+```bash
+php bin/anylint report src                                  # summary in the terminal
+php bin/anylint report src --format html --output report.html
+php bin/anylint report src --format json                    # the same data, machine-readable
+```
+
+Not a list of findings, but the state of the codebase: files and lines of code per language, findings by rule and severity, the most complex functions, hotspot files (error = 3, warning = 1; `info`/TODOs don't count), and how much code is duplicated. The HTML report is a single self-contained file (no scripts, fonts or CDNs) with light and dark themes — open it offline or attach it as a CI artifact. The baseline is deliberately **not** applied: it hides accepted findings from the CI gate, while the report shows the whole debt. Suppression comments do apply. A report always exits `0` — it's not a check.
+
+### Complexity
+
+Both metrics are computed from the canonical tree, so they mean the same in every language with functions:
+
+- **cyclomatic** = 1 + number of branches (`if`, loops, `catch`);
+- **cognitive** = each branch costs 1 plus 1 per level of nesting it sits in (the idea behind Sonar's Cognitive Complexity). An `else if` chain is a continuation, not nesting.
+
+Honest limit: `&&`/`||` and `switch` cases aren't counted — the PHP tree is statement-level only, and counting them for some languages would make the numbers incomparable. So the values run a bit lower than Sonar's for the same code.
+
 ## Speed
 
 - **One long-lived Node.js process per dumper**, not one per file. Starting `node` and loading the TypeScript compiler cost ~0.6 s per JS/TS file before; the dumpers now run with `--serve` (one JSON request per line on stdin, one JSON response per line on stdout) and `NodeWorker` keeps the process for the whole run. Measured on a real project (162 JS + 18 Java + 44 PHP files): **125 s → 7.2 s**, with byte-identical findings. Exception: Lua. Its tree-sitter grammar parses only the *first* file in a process correctly (every later parse reports a false syntax error), so Lua files still get a one-shot `node` each.
@@ -143,6 +162,8 @@ A finding is matched by file, rule and message, with a count — not by line num
 | `promotable-return-type` | PHP-specific, with auto-fix | a method's `@return TYPE` docblock could be a native return type instead |
 | `hardcoded-secret` | textual | GitHub/AWS tokens, private keys, `password = "..."` right in the code |
 | `todo-tracker` | textual | `// TODO` / `# FIXME` / `-- TODO` in comments (not in strings or identifiers) |
+| `complex-function` | structural (same coverage as `empty-function`) | cognitive complexity above 15 (option `maxCognitive`) — see [Complexity](#complexity) |
+| `duplicate-code` | project-wide (all files with a language) | a fragment of 8+ lines (option `minLines`) repeated in another place or file. Compared by normalized text — whitespace, blank and punctuation-only lines and imports are ignored, so renamed variables aren't caught |
 | `windows-script-encoding` | textual, `.ps1`/`.bat`/`.cmd` only | Cyrillic (or other non-ASCII) without a UTF-8 BOM in `.ps1` — legacy Windows PowerShell 5.1 misreads it; any non-ASCII at all in `.bat`/`.cmd` — `cmd.exe`'s encoding handling is unreliable regardless of BOM |
 
 ## Architecture
@@ -164,6 +185,11 @@ src/
 tools/js-ast-dump/dump.js          — TypeScript compiler API -> the same canonical JSON schema as "nx ast"
 tools/treesitter-ast-dump/dump.js  — tree-sitter (15 languages, LANG_CONFIG) -> the same canonical JSON schema
   Rules/*                — the rules themselves
+  ProjectRule.php        — a rule over the whole project: collect() per file (cached), finish() over all facts
+  Metrics/Complexity.php — cyclomatic/cognitive complexity and lines of code from the canonical tree
+  FileResult.php, AnalysisResult.php — per-file findings + metrics (what the cache and --jobs carry)
+  Report/*               — `anylint report`: ProjectReport (the model = JSON), TextReport, HtmlReport
+  Ast/NodeDecoder.php    — canonical JSON from dump.js / `nx ast` -> Node, with shape checks
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (for --checkstyle)
   Formatters/SarifFormatter.php — Finding[] -> SARIF 2.1.0 (for --sarif)
   Baseline.php, Fixer.php — --generate-baseline/--baseline, --fix
@@ -174,6 +200,8 @@ tools/treesitter-ast-dump/dump.js  — tree-sitter (15 languages, LANG_CONFIG) -
   Analyzer.php            — file traversal, provider selection, running the rules
 bin/anylint                — the CLI
 ```
+
+Every provider returns an `if / else if / else` chain in the same canonical shape — `If[Block(then), If(next) | Block(else)]` — whatever its parser does (`else_clause` wrappers in C/Rust/Zig, flat `elif` siblings in Python/Lua, flat `elseif` in PHP...). `tests/fixtures/else-if-chain/` holds the same chain in every language, and `MetricsTest` checks that each one gives cyclomatic 4 and cognitive 3.
 
 Adding a new language = write one `LanguageProvider` class and register it with `->withProvider(new ...)` in `bin/anylint` — no changes to the core or to any existing structural/textual rule.
 

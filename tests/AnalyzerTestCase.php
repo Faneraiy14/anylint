@@ -6,7 +6,9 @@ namespace Tests;
 
 use AnyLint\Analyzer;
 use AnyLint\Providers\PhpProvider;
+use AnyLint\Rules\ComplexFunctionRule;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
+use AnyLint\Rules\DuplicateCodeRule;
 use AnyLint\Rules\DeepNestingRule;
 use AnyLint\Rules\EmptyBlockRule;
 use AnyLint\Rules\EmptyCatchRule;
@@ -89,6 +91,8 @@ abstract class AnalyzerTestCase extends TestCase
             ->withRule(new UnusedVariableRule())
             ->withRule(new PromotableReturnTypeRule())
             ->withRule(new WindowsScriptEncodingRule())
+            ->withRule(new ComplexFunctionRule())
+            ->withRule(new DuplicateCodeRule())
             ->withRule(new TodoTrackerRule());
     }
 

@@ -39,17 +39,36 @@ final class ParallelRunner
 
     /**
      * @param list<string> $files
-     * @param callable(string): Finding[] $analyze
-     * @return list<Finding[]>|null знахідки по кожному файлу в порядку $files; null - fork недоступний
+     * @param callable(string): FileResult $analyze
+     * @return list<FileResult>|null результат по кожному файлу в порядку $files; null - fork недоступний
      */
     public static function run(array $files, int $jobs, callable $analyze): ?array
     {
         if (!self::isSupported() || $jobs < 2 || count($files) < 2) {
             return null;
         }
-        $jobs = min($jobs, count($files));
+        $children = self::spawnChildren($files, min($jobs, count($files)), $analyze);
+        if ($children === []) {
+            return null;
+        }
 
-        /** @var list<array{pid: int, socket: resource, file: string}> $children */
+        self::dispatch($files, $children);
+        $byIndex = self::collectResults($children);
+
+        $ordered = [];
+        foreach ($files as $index => $file) {
+            $ordered[] = $byIndex[$index] ?? $analyze($file);
+        }
+        return $ordered;
+    }
+
+    /**
+     * @param list<string> $files
+     * @param callable(string): FileResult $analyze
+     * @return list<array{pid: int, socket: resource, file: string}> скільки вдалось запустити
+     */
+    private static function spawnChildren(array $files, int $jobs, callable $analyze): array
+    {
         $children = [];
         for ($i = 0; $i < $jobs; $i++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -69,40 +88,38 @@ final class ParallelRunner
             fclose($pair[1]);
             $children[] = ['pid' => $pid, 'socket' => $pair[0], 'file' => $resultFile];
         }
-        if ($children === []) {
-            return null;
-        }
+        return $children;
+    }
 
-        self::dispatch($files, $children);
-
-        /** @var array<int, Finding[]> $byIndex */
+    /**
+     * @param list<array{pid: int, socket: resource, file: string}> $children
+     * @return array<int, FileResult> за індексом файлу в $files
+     * @throws \RuntimeException помилка аналізу в дочірньому процесі
+     */
+    private static function collectResults(array $children): array
+    {
         $byIndex = [];
         foreach ($children as $child) {
             pcntl_waitpid($child['pid'], $status);
             $payload = @file_get_contents($child['file']);
             @unlink($child['file']);
-            $result = $payload === false ? false : @unserialize($payload, ['allowed_classes' => [Finding::class, Severity::class]]);
+            $result = $payload === false ? false : @unserialize($payload, ['allowed_classes' => FileResult::SERIALIZABLE]);
 
             if (is_array($result) && isset($result['error']) && is_string($result['error'])) {
                 throw new \RuntimeException($result['error']);
             }
             // Дочірній процес упав, не записавши результат (OOM, сигнал) -
-            // його файли доробляються нижче, послідовно, а не губляться.
+            // його файли доробляються в run(), послідовно, а не губляться.
             if (!is_array($result) || !isset($result['findings']) || !is_array($result['findings'])) {
                 continue;
             }
-            foreach ($result['findings'] as $index => $findings) {
-                if (is_int($index) && is_array($findings)) {
-                    $byIndex[$index] = array_values(array_filter($findings, static fn ($f) => $f instanceof Finding));
+            foreach ($result['findings'] as $index => $fileResult) {
+                if (is_int($index) && $fileResult instanceof FileResult) {
+                    $byIndex[$index] = $fileResult;
                 }
             }
         }
-
-        $ordered = [];
-        foreach ($files as $index => $file) {
-            $ordered[] = $byIndex[$index] ?? $analyze($file);
-        }
-        return $ordered;
+        return $byIndex;
     }
 
     /**
@@ -171,7 +188,7 @@ final class ParallelRunner
     /**
      * @param list<string> $files
      * @param resource $socket
-     * @param callable(string): Finding[] $analyze
+     * @param callable(string): FileResult $analyze
      */
     private static function runChild(array $files, $socket, callable $analyze, string $resultFile): never
     {

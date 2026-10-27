@@ -55,40 +55,38 @@ final class WindowsScriptEncodingRule implements Rule
         if ($hasBom) {
             return [];
         }
-        $line = $this->firstNonAsciiLine($source);
-        if ($line === null) {
-            return [];
-        }
-        return [new Finding(
+        return $this->nonAsciiFinding(
+            $source,
             $filePath,
-            $line,
-            $this->name(),
-            Severity::Error,
             'PowerShell-скрипт містить не-ASCII символи (кирилицю тощо), але без UTF-8 BOM. ' .
             'Легасі Windows PowerShell 5.1 (типовий на звичайному Windows) без BOM читає файл ' .
             'під системною ANSI-кодовою сторінкою - частина байтів може випадково збігтись із ' .
             'лапками/дужками, ламаючи парсинг ("Missing closing \')\' in expression" на рядках, ' .
             'що є просто текстом). Додай BOM на початок файлу.',
-        )];
+        );
     }
 
     /** @return list<Finding> */
     private function checkBatch(string $source, string $filePath): array
     {
-        $line = $this->firstNonAsciiLine($source);
-        if ($line === null) {
-            return [];
-        }
-        return [new Finding(
+        return $this->nonAsciiFinding(
+            $source,
             $filePath,
-            $line,
-            $this->name(),
-            Severity::Error,
             '.bat/.cmd-файл містить не-ASCII символи (кирилицю тощо). cmd.exe ненадійно читає ' .
             'кодування batch-файлів незалежно від BOM - особливо в багаторядкових if(...)-блоках, ' .
             'де це може обірвати рядок команди на половині слова. Найнадійніше - тримати .bat/.cmd ' .
             'чистим ASCII (англійською).',
-        )];
+        );
+    }
+
+    /** @return list<Finding> одна знахідка на першому не-ASCII рядку або нічого */
+    private function nonAsciiFinding(string $source, string $filePath, string $message): array
+    {
+        $line = $this->firstNonAsciiLine($source);
+        if ($line === null) {
+            return [];
+        }
+        return [new Finding($filePath, $line, $this->name(), Severity::Error, $message)];
     }
 
     private function firstNonAsciiLine(string $source): ?int

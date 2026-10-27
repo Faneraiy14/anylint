@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AnyLint;
 
 use AnyLint\Ast\Node;
+use AnyLint\Metrics\Complexity;
 
 final class Analyzer
 {
@@ -94,10 +95,21 @@ final class Analyzer
      */
     public function analyzePath(string $path): array
     {
+        return $this->analyze($path)->findings;
+    }
+
+    /**
+     * Те саме, що analyzePath(), але з усім, що дізнались про кожен файл
+     * (мова, рядки, метрики функцій) - для "anylint report".
+     *
+     * @throws \RuntimeException
+     */
+    public function analyze(string $path): AnalysisResult
+    {
         $this->applyConfig();
 
         if (is_file($path)) {
-            return $this->isExcluded($path) ? [] : $this->analyzeFiles([$path]);
+            return $this->analyzeFiles($this->isExcluded($path) ? [] : [$path]);
         }
         if (!is_dir($path)) {
             throw new \RuntimeException("Шлях не існує: {$path}");
@@ -128,16 +140,13 @@ final class Analyzer
         return $this->analyzeFiles($files);
     }
 
-    /**
-     * @param list<string> $files
-     * @return Finding[]
-     */
-    private function analyzeFiles(array $files): array
+    /** @param list<string> $files */
+    private function analyzeFiles(array $files): AnalysisResult
     {
         $cache = $this->cacheFile !== null ? ResultCache::open($this->cacheFile, $this->fingerprint()) : null;
 
-        /** @var array<int, Finding[]> $perFile */
-        $perFile = [];
+        /** @var array<int, FileResult> $results */
+        $results = [];
         /** @var array<int, string> $keys індекс файлу => ключ кешу */
         $keys = [];
         $misses = [];
@@ -147,29 +156,73 @@ final class Analyzer
                 $keys[$index] = ResultCache::key($file, $source);
                 $hit = $cache->get($keys[$index]);
                 if ($hit !== null) {
-                    $perFile[$index] = $hit;
+                    $results[$index] = $hit;
                     continue;
                 }
             }
             $misses[$index] = $file;
         }
 
-        $analyze = fn (string $file): array => $this->analyzeFile($file);
+        $analyze = fn (string $file): FileResult => $this->analyzeFile($file);
         $missFiles = array_values($misses);
         $missResults = ParallelRunner::run($missFiles, $this->jobs, $analyze) ?? array_map($analyze, $missFiles);
         foreach (array_keys($misses) as $i => $index) {
-            $findings = $missResults[$i] ?? [];
-            $perFile[$index] = $findings;
-            if ($cache !== null && isset($keys[$index]) && $this->isCacheable($findings)) {
-                $cache->put($keys[$index], $findings);
+            $result = $missResults[$i] ?? new FileResult($misses[$index], []);
+            $results[$index] = $result;
+            if ($cache !== null && isset($keys[$index]) && $this->isCacheable($result->findings)) {
+                $cache->put($keys[$index], $result);
             }
         }
         $cache?->save();
+        ksort($results);
+        $results = array_values($results);
 
-        ksort($perFile);
+        $results = $this->finishProjectRules($results);
+
         // array_merge одним викликом, а не [...$findings, ...$new] у циклі -
         // те копіювало весь накопичений масив на кожному файлі (O(n^2)).
-        return $perFile === [] ? [] : array_merge(...array_values($perFile));
+        $findings = $results === [] ? [] : array_merge(...array_map(static fn (FileResult $r) => $r->findings, $results));
+        return new AnalysisResult($results, $findings);
+    }
+
+    /**
+     * Другий крок ProjectRule: факти всіх файлів -> знахідки, які далі
+     * проходять ті самі директиви й severity, що й знахідки звичайних
+     * правил, і додаються до свого файлу (тож порядок виводу - за файлами).
+     *
+     * @param list<FileResult> $results
+     * @return list<FileResult>
+     */
+    private function finishProjectRules(array $results): array
+    {
+        $byFile = [];
+        foreach ($this->activeRules as $rule) {
+            if (!$rule instanceof ProjectRule) {
+                continue;
+            }
+            $facts = [];
+            foreach ($results as $result) {
+                if (array_key_exists($rule->name(), $result->facts)) {
+                    $facts[$result->file] = $result->facts[$rule->name()];
+                }
+            }
+            foreach ($rule->finish($facts) as $finding) {
+                $byFile[$finding->file][] = $finding;
+            }
+        }
+        if ($byFile === []) {
+            return $results;
+        }
+
+        foreach ($results as $i => $result) {
+            if (!isset($byFile[$result->file])) {
+                continue;
+            }
+            $source = @file_get_contents($result->file);
+            $extra = $this->postProcess($byFile[$result->file], $source === false ? null : $source);
+            $results[$i] = $result->withFindings([...$result->findings, ...$extra]);
+        }
+        return $results;
     }
 
     /**
@@ -208,8 +261,7 @@ final class Analyzer
         return sha1(implode("\n", $parts));
     }
 
-    /** @return Finding[] */
-    private function analyzeFile(string $filePath): array
+    private function analyzeFile(string $filePath): FileResult
     {
         // @ навмисно: file_get_contents() інакше друкує сирий PHP Warning
         // прямо в stderr при недоступному файлі (напр. permission denied),
@@ -221,13 +273,13 @@ final class Analyzer
             // Файл, який НЕ вдалось прочитати, - це НЕ "чистий" файл: без
             // цієї Finding --json віддав би "ok": true, приховуючи, що
             // частина коду взагалі не потрапила під аналіз.
-            return $this->postProcess([new Finding(
+            return new FileResult($filePath, $this->postProcess([new Finding(
                 $filePath,
                 1,
                 'unreadable-file',
                 Severity::Error,
                 'Не вдалось прочитати файл: ' . ($error['message'] ?? 'невідома причина'),
-            )], null);
+            )], null));
         }
 
         $findings = [];
@@ -249,11 +301,26 @@ final class Analyzer
             }
         }
 
+        $language = $provider?->name();
+        $facts = [];
         foreach ($this->activeRules as $rule) {
             $findings = [...$findings, ...$rule->check($root, $source, $filePath)];
+            if ($rule instanceof ProjectRule) {
+                $collected = $rule->collect($root, $source, $filePath, $root === $textOnlyRoot ? null : $language);
+                if ($collected !== null) {
+                    $facts[$rule->name()] = $collected;
+                }
+            }
         }
 
-        return $this->postProcess($findings, $source);
+        return new FileResult(
+            $filePath,
+            $this->postProcess($findings, $source),
+            $language,
+            Complexity::linesOfCode($source),
+            Complexity::functions($root),
+            $facts,
+        );
     }
 
     /**

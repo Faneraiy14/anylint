@@ -14,6 +14,9 @@ use AnyLint\ParallelRunner;
 use AnyLint\ResultCache;
 use AnyLint\Formatters\CheckstyleFormatter;
 use AnyLint\Formatters\SarifFormatter;
+use AnyLint\Report\HtmlReport;
+use AnyLint\Report\ProjectReport;
+use AnyLint\Report\TextReport;
 use AnyLint\Providers\CProvider;
 use AnyLint\Providers\CppProvider;
 use AnyLint\Providers\CSharpProvider;
@@ -33,7 +36,9 @@ use AnyLint\Providers\SolidityProvider;
 use AnyLint\Providers\SwiftProvider;
 use AnyLint\Providers\TypeScriptProvider;
 use AnyLint\Providers\ZigProvider;
+use AnyLint\Rules\ComplexFunctionRule;
 use AnyLint\Rules\DeadCodeAfterReturnRule;
+use AnyLint\Rules\DuplicateCodeRule;
 use AnyLint\Rules\DeepNestingRule;
 use AnyLint\Rules\EmptyBlockRule;
 use AnyLint\Rules\EmptyCatchRule;
@@ -47,10 +52,17 @@ use AnyLint\Rules\WindowsScriptEncodingRule;
 use AnyLint\Severity;
 
 $args = array_slice($argv, 1);
+// "anylint report <шлях>" - зведення стану проєкту замість списку знахідок.
+$report = ($args[0] ?? null) === 'report';
+if ($report) {
+    array_shift($args);
+}
 
 if (in_array('--help', $args, true) || $args === []) {
     echo "anylint <шлях> [--json|--checkstyle|--sarif] [--fix] [--no-todo] [--jobs <N>] [--no-cache]\n";
     echo "        [--config <файл>] [--no-config] [--baseline <файл>] [--generate-baseline]\n";
+    echo "anylint report <шлях> [--format text|json|html] [--output <файл>] [--no-todo] [--jobs <N>]\n";
+    echo "        [--no-cache] [--config <файл>] [--no-config]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
     echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go,\n";
     echo "        Kotlin, Lua, Ruby, Dart, Zig, Objective-C, Solidity.\n";
@@ -67,6 +79,12 @@ if (in_array('--help', $args, true) || $args === []) {
     echo "                кількість ядер; без розширення pcntl завжди послідовно).\n";
     echo "  --no-cache:   не використовувати кеш результатів (типово незмінені файли не\n";
     echo "                розбираються вдруге; кеш - у системній тимчасовій теці).\n";
+    echo "\n";
+    echo "  report:       зведення стану проєкту: мови й рядки коду, знахідки за правилами й\n";
+    echo "                серйозністю, найскладніші функції, гарячі файли, частка дублювання.\n";
+    echo "                Baseline не застосовується - звіт показує весь борг, разом із прийнятим.\n";
+    echo "  --format:     text (типово), json або html (самодостатній файл, світла/темна тема).\n";
+    echo "  --output <файл>: записати звіт у файл замість stdout.\n";
     exit(0);
 }
 
@@ -80,7 +98,7 @@ $generateBaseline = in_array('--generate-baseline', $args, true);
 $noCache = in_array('--no-cache', $args, true);
 
 /** @var array<string, string|null> $values опції зі значенням: --name <v> або --name=<v> */
-$values = ['--config' => null, '--baseline' => null, '--jobs' => null];
+$values = ['--config' => null, '--baseline' => null, '--jobs' => null, '--format' => null, '--output' => null];
 $path = null;
 for ($i = 0; $i < count($args); $i++) {
     $arg = $args[$i];
@@ -119,6 +137,19 @@ if ($values['--jobs'] === 'auto') {
 }
 if ($path === null) {
     fwrite(STDERR, "Не вказано шлях для аналізу.\n");
+    exit(2);
+}
+$reportFormat = $values['--format'] ?? 'text';
+if ($report && !in_array($reportFormat, ['text', 'json', 'html'], true)) {
+    fwrite(STDERR, "--format очікує text, json або html.\n");
+    exit(2);
+}
+if (!$report && ($values['--format'] !== null || $values['--output'] !== null)) {
+    fwrite(STDERR, "--format і --output - опції 'anylint report'.\n");
+    exit(2);
+}
+if ($report && ($fix || $generateBaseline || $values['--baseline'] !== null || $json || $checkstyle || $sarif)) {
+    fwrite(STDERR, "'anylint report' не поєднується з --fix, --baseline, --generate-baseline, --json, --checkstyle, --sarif.\n");
     exit(2);
 }
 
@@ -161,7 +192,9 @@ $analyzer = (new Analyzer())
     ->withRule(new LongFunctionRule())
     ->withRule(new UnusedVariableRule())
     ->withRule(new PromotableReturnTypeRule())
-    ->withRule(new WindowsScriptEncodingRule());
+    ->withRule(new WindowsScriptEncodingRule())
+    ->withRule(new ComplexFunctionRule())
+    ->withRule(new DuplicateCodeRule());
 
 if (!$noTodo) {
     $analyzer->withRule(new TodoTrackerRule());
@@ -179,6 +212,24 @@ try {
     if (!$noCache) {
         $analyzer->withCache(ResultCache::defaultFile($path));
     }
+    if ($report) {
+        $data = ProjectReport::build($analyzer->analyze($path), $path);
+        $output = match ($reportFormat) {
+            'json' => json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n",
+            'html' => HtmlReport::render($data, realpath($path) ?: $path),
+            default => TextReport::render($data),
+        };
+        if ($values['--output'] === null) {
+            echo $output;
+        } elseif (@file_put_contents($values['--output'], $output) === false) {
+            throw new \RuntimeException("Не вдалось записати звіт у {$values['--output']}.");
+        } else {
+            fwrite(STDERR, "Звіт записано: {$values['--output']}\n");
+        }
+        // Звіт - не перевірка: успішно побудований звіт завжди exit 0.
+        exit(0);
+    }
+
     $findings = $analyzer->analyzePath($path);
 
     if ($fix) {

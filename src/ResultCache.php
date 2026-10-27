@@ -20,12 +20,12 @@ namespace AnyLint;
  */
 final class ResultCache
 {
-    private const FORMAT = 1;
+    private const FORMAT = 2;
 
-    /** @var array<string, Finding[]> */
+    /** @var array<string, FileResult> */
     private array $entries = [];
 
-    /** @var array<string, Finding[]> записи, потрібні в ЦЬОМУ прогоні - лише вони й зберігаються */
+    /** @var array<string, FileResult> записи, потрібні в ЦЬОМУ прогоні - лише вони й зберігаються */
     private array $used = [];
 
     private bool $dirty = false;
@@ -48,7 +48,7 @@ final class ResultCache
         if ($payload === false) {
             return $cache;
         }
-        $data = @unserialize($payload, ['allowed_classes' => [Finding::class, Severity::class]]);
+        $data = @unserialize($payload, ['allowed_classes' => FileResult::SERIALIZABLE]);
         // Інший формат чи відбиток - мовчки починаємо з порожнього кешу:
         // зіпсований/застарілий кеш ніколи не має бути причиною помилки.
         if (
@@ -59,9 +59,9 @@ final class ResultCache
         ) {
             return $cache;
         }
-        foreach ($data['entries'] as $key => $findings) {
-            if (is_string($key) && is_array($findings)) {
-                $cache->entries[$key] = array_values(array_filter($findings, static fn ($f) => $f instanceof Finding));
+        foreach ($data['entries'] as $key => $result) {
+            if (is_string($key) && $result instanceof FileResult) {
+                $cache->entries[$key] = $result;
             }
         }
         return $cache;
@@ -104,8 +104,7 @@ final class ResultCache
         return sha1($filePath . "\0" . sha1($source));
     }
 
-    /** @return Finding[]|null */
-    public function get(string $key): ?array
+    public function get(string $key): ?FileResult
     {
         if (!isset($this->entries[$key])) {
             return null;
@@ -113,10 +112,9 @@ final class ResultCache
         return $this->used[$key] = $this->entries[$key];
     }
 
-    /** @param Finding[] $findings */
-    public function put(string $key, array $findings): void
+    public function put(string $key, FileResult $result): void
     {
-        $this->entries[$key] = $this->used[$key] = $findings;
+        $this->entries[$key] = $this->used[$key] = $result;
         $this->dirty = true;
     }
 

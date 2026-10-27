@@ -71,22 +71,7 @@ final class UnusedVariableRule implements Rule
     {
         $finder = new NodeFinder();
 
-        /** @var Expr\Variable[] $allVars */
-        $allVars = $finder->find($stmts, fn (PhpNode $n) => $n instanceof Expr\Variable && is_string($n->name));
-
-        $countByName = [];
-        foreach ($allVars as $v) {
-            // $finder-фільтр вище вже перевіряв is_string($n->name), але
-            // PHPStan не проносить цю перевірку через замикання в тип
-            // елементів $allVars (Expr\Variable::$name задекларовано як
-            // Expr|string - для "змінних змінних" $$foo). Тому перевірка
-            // тут - не дублювання, а єдине місце, де PHPStan справді бачить
-            // звуження до string.
-            if (!is_string($v->name)) {
-                continue;
-            }
-            $countByName[$v->name] = ($countByName[$v->name] ?? 0) + 1;
-        }
+        $countByName = $this->variableUseCounts($finder, $stmts);
 
         // compact('foo', 'bar')/extract() читають/пишуть локальні змінні за
         // РЯДКОВИМ іменем - невидимо для підрахунку Expr\Variable вище.
@@ -106,21 +91,7 @@ final class UnusedVariableRule implements Rule
             return [];
         }
 
-        /** @var Expr\FuncCall[] $compactCalls */
-        $compactCalls = $finder->find(
-            $stmts,
-            fn (PhpNode $n) => $n instanceof Expr\FuncCall
-                && $n->name instanceof \PhpParser\Node\Name
-                && in_array(strtolower($n->name->toString()), ['compact', 'extract'], true),
-        );
-        $namedByString = [];
-        foreach ($compactCalls as $call) {
-            foreach ($call->args as $arg) {
-                if ($arg instanceof \PhpParser\Node\Arg && $arg->value instanceof \PhpParser\Node\Scalar\String_) {
-                    $namedByString[$arg->value->value] = true;
-                }
-            }
-        }
+        $namedByString = $this->namesReadAsStrings($finder, $stmts);
 
         /** @var Expr\Assign[] $assigns */
         $assigns = $finder->find($stmts, fn (PhpNode $n) => $n instanceof Expr\Assign && $n->var instanceof Expr\Variable);
@@ -149,5 +120,56 @@ final class UnusedVariableRule implements Rule
             }
         }
         return $findings;
+    }
+
+    /**
+     * @param Stmt[] $stmts
+     * @return array<string, int> скільки разів трапляється кожна змінна
+     */
+    private function variableUseCounts(NodeFinder $finder, array $stmts): array
+    {
+        /** @var Expr\Variable[] $allVars */
+        $allVars = $finder->find($stmts, fn (PhpNode $n) => $n instanceof Expr\Variable && is_string($n->name));
+
+        $countByName = [];
+        foreach ($allVars as $v) {
+            // $finder-фільтр вище вже перевіряв is_string($n->name), але
+            // PHPStan не проносить цю перевірку через замикання в тип
+            // елементів $allVars (Expr\Variable::$name задекларовано як
+            // Expr|string - для "змінних змінних" $$foo). Тому перевірка
+            // тут - не дублювання, а єдине місце, де PHPStan справді бачить
+            // звуження до string.
+            if (!is_string($v->name)) {
+                continue;
+            }
+            $countByName[$v->name] = ($countByName[$v->name] ?? 0) + 1;
+        }
+        return $countByName;
+    }
+
+    /**
+     * Імена, передані рядком у compact()/extract().
+     *
+     * @param Stmt[] $stmts
+     * @return array<string, true>
+     */
+    private function namesReadAsStrings(NodeFinder $finder, array $stmts): array
+    {
+        /** @var Expr\FuncCall[] $compactCalls */
+        $compactCalls = $finder->find(
+            $stmts,
+            fn (PhpNode $n) => $n instanceof Expr\FuncCall
+                && $n->name instanceof \PhpParser\Node\Name
+                && in_array(strtolower($n->name->toString()), ['compact', 'extract'], true),
+        );
+        $namedByString = [];
+        foreach ($compactCalls as $call) {
+            foreach ($call->args as $arg) {
+                if ($arg instanceof \PhpParser\Node\Arg && $arg->value instanceof \PhpParser\Node\Scalar\String_) {
+                    $namedByString[$arg->value->value] = true;
+                }
+            }
+        }
+        return $namedByString;
     }
 }

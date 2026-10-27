@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AnyLint\Providers;
 
 use AnyLint\Ast\Node;
+use AnyLint\Ast\NodeDecoder;
 use AnyLint\LanguageProvider;
 
 /**
@@ -51,54 +52,6 @@ abstract class AbstractJsFamilyProvider implements LanguageProvider
             );
         }
 
-        return $this->toNode($response['ast']);
-    }
-
-    /**
-     * Той самий підхід, що й у NyxilumProvider::toNode() - явна перевірка
-     * форми замість сліпих кастів mixed, бо json_decode() із stdout
-     * зовнішнього процесу це недовірені дані.
-     *
-     * @param array<mixed> $data
-     */
-    private function toNode(array $data): Node
-    {
-        $type = $data['type'] ?? null;
-        if (!is_string($type)) {
-            throw new \RuntimeException('Вузол AST від dump.js без рядкового поля "type": ' . json_encode($data));
-        }
-
-        $line = $data['line'] ?? null;
-        if (!is_int($line)) {
-            throw new \RuntimeException("Вузол '{$type}' від dump.js без цілого поля \"line\".");
-        }
-
-        $attributesRaw = $data['attributes'] ?? [];
-        $attributes = is_array($attributesRaw) ? $this->toStringKeyedArray($attributesRaw) : [];
-
-        $children = [];
-        $childrenRaw = $data['children'] ?? [];
-        if (is_array($childrenRaw)) {
-            foreach ($childrenRaw as $child) {
-                if (is_array($child)) {
-                    $children[] = $this->toNode($child);
-                }
-            }
-        }
-
-        return new Node($type, $line, $attributes, $children);
-    }
-
-    /**
-     * @param array<mixed> $raw
-     * @return array<string, mixed>
-     */
-    private function toStringKeyedArray(array $raw): array
-    {
-        $result = [];
-        foreach ($raw as $key => $value) {
-            $result[(string) $key] = $value;
-        }
-        return $result;
+        return NodeDecoder::decode($response['ast'], 'dump.js');
     }
 }

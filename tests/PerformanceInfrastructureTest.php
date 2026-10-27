@@ -7,6 +7,7 @@ namespace Tests;
 use AnyLint\Analyzer;
 use AnyLint\Ast\Node;
 use AnyLint\Config;
+use AnyLint\FileResult;
 use AnyLint\Finding;
 use AnyLint\ParallelRunner;
 use AnyLint\Providers\NodeWorker;
@@ -143,11 +144,11 @@ final class PerformanceInfrastructureTest extends AnalyzerTestCase
         }
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('boom in b');
-        ParallelRunner::run(['a', 'b', 'c'], 2, static function (string $file): array {
+        ParallelRunner::run(['a', 'b', 'c'], 2, static function (string $file): FileResult {
             if ($file === 'b') {
                 throw new \RuntimeException('boom in b');
             }
-            return [];
+            return new FileResult($file, []);
         });
     }
 

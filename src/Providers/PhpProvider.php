@@ -53,6 +53,32 @@ final class PhpProvider implements LanguageProvider
         return new Node('Block', $line, [], $children);
     }
 
+    /**
+     * Канонічний ланцюжок, як у решти мов: If[Block(then), If(elseif) |
+     * Block(else)]. php-parser дає elseif-и пласким списком - якщо так і
+     * лишити, гілки elseif не рахувались би розгалуженнями в метриках.
+     */
+    private function convertIf(Stmt\If_ $stmt): Node
+    {
+        $tail = $stmt->else !== null ? $this->convertStmts($stmt->else->stmts) : null;
+        foreach (array_reverse($stmt->elseifs) as $elseif) {
+            $tail = new Node(
+                'If',
+                $elseif->getLine(),
+                [],
+                [$this->convertStmts($elseif->stmts), ...($tail !== null ? [$tail] : [])],
+                $elseif,
+            );
+        }
+        return new Node(
+            'If',
+            $stmt->getLine(),
+            [],
+            [$this->convertStmts($stmt->stmts), ...($tail !== null ? [$tail] : [])],
+            $stmt,
+        );
+    }
+
     private function convertStmt(PhpNode $stmt): Node
     {
         $line = $stmt->getLine();
@@ -126,16 +152,7 @@ final class PhpProvider implements LanguageProvider
                     ), $stmt->catches)),
                 ],
             ),
-            $stmt instanceof Stmt\If_ => new Node(
-                'If',
-                $line,
-                [],
-                [
-                    $this->convertStmts($stmt->stmts),
-                    ...($stmt->else !== null ? [$this->convertStmts($stmt->else->stmts)] : []),
-                    ...array_values(array_map(fn (Stmt\ElseIf_ $ei) => $this->convertStmts($ei->stmts), $stmt->elseifs)),
-                ],
-            ),
+            $stmt instanceof Stmt\If_ => $this->convertIf($stmt),
             $stmt instanceof Stmt\While_ => new Node('While', $line, [], [$this->convertStmts($stmt->stmts)]),
             $stmt instanceof Stmt\Do_ => new Node('Do', $line, [], [$this->convertStmts($stmt->stmts)]),
             $stmt instanceof Stmt\For_ => new Node('For', $line, [], [$this->convertStmts($stmt->stmts)]),

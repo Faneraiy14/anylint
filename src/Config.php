@@ -104,12 +104,29 @@ final class Config
             }
         }
 
-        $severities = [];
-        $options = [];
-        $rules = $data['rules'] ?? [];
+        [$severities, $options] = self::parseRules($data['rules'] ?? [], $source);
+
+        return new self(
+            $baseDir,
+            $severities,
+            $options,
+            self::parseExclude($data['exclude'] ?? [], $source),
+            $source,
+            self::parseBaseline($data['baseline'] ?? null, $baseDir, $source),
+        );
+    }
+
+    /**
+     * @return array{array<string, ?Severity>, array<string, array<string, mixed>>}
+     * @throws \RuntimeException
+     */
+    private static function parseRules(mixed $rules, string $source): array
+    {
         if (!is_array($rules) || ($rules !== [] && array_is_list($rules))) {
             throw new \RuntimeException("{$source}: 'rules' має бути об'єктом {\"назва-правила\": налаштування}.");
         }
+        $severities = [];
+        $options = [];
         foreach ($rules as $rule => $setting) {
             $rule = (string) $rule;
             if (is_string($setting)) {
@@ -129,15 +146,18 @@ final class Config
                 unset($setting['severity']);
             }
             if ($setting !== []) {
-                $ruleOptions = [];
-                foreach ($setting as $optionName => $optionValue) {
-                    $ruleOptions[(string) $optionName] = $optionValue;
-                }
-                $options[$rule] = $ruleOptions;
+                $options[$rule] = array_combine(array_map('strval', array_keys($setting)), array_values($setting));
             }
         }
+        return [$severities, $options];
+    }
 
-        $exclude = $data['exclude'] ?? [];
+    /**
+     * @return list<string>
+     * @throws \RuntimeException
+     */
+    private static function parseExclude(mixed $exclude, string $source): array
+    {
         if (!is_array($exclude) || !array_is_list($exclude)) {
             throw new \RuntimeException("{$source}: 'exclude' має бути масивом glob-шаблонів.");
         }
@@ -148,16 +168,19 @@ final class Config
             }
             $patterns[] = $pattern;
         }
+        return $patterns;
+    }
 
-        $baseline = $data['baseline'] ?? null;
-        if ($baseline !== null && (!is_string($baseline) || trim($baseline) === '')) {
+    /** @throws \RuntimeException */
+    private static function parseBaseline(mixed $baseline, string $baseDir, string $source): ?string
+    {
+        if ($baseline === null) {
+            return null;
+        }
+        if (!is_string($baseline) || trim($baseline) === '') {
             throw new \RuntimeException("{$source}: 'baseline' має бути шляхом до файлу.");
         }
-        if (is_string($baseline) && !self::isAbsolute($baseline)) {
-            $baseline = $baseDir . DIRECTORY_SEPARATOR . $baseline;
-        }
-
-        return new self($baseDir, $severities, $options, $patterns, $source, $baseline);
+        return self::isAbsolute($baseline) ? $baseline : $baseDir . DIRECTORY_SEPARATOR . $baseline;
     }
 
     public function isDisabled(string $rule): bool

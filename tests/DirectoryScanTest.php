@@ -45,4 +45,16 @@ final class DirectoryScanTest extends AnalyzerTestCase
         $todos = $this->findingsFor($findings, 'todo-tracker');
         $this->assertCount(1, $todos, 'var/ should have been skipped');
     }
+
+    public function testClaudeCodeWorktreesAreSkipped(): void
+    {
+        $dir = $this->tempDir();
+        mkdir($dir . '/src', 0777, true);
+        mkdir($dir . '/.claude/worktrees/keen-x/src', 0777, true);
+        file_put_contents($dir . '/src/a.php', "<?php\n// TODO: реальний todo\n");
+        file_put_contents($dir . '/.claude/worktrees/keen-x/src/a.php', "<?php\n// TODO: копія з worktree\n");
+
+        $todos = $this->findingsFor($this->newAnalyzer()->analyzePath($dir), 'todo-tracker');
+        $this->assertCount(1, $todos, '.claude/ worktree copies should have been skipped');
+    }
 }

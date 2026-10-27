@@ -50,8 +50,12 @@ final class Analyzer
      * файли перекладів з рядками на кшталт "password"/"passphrase" як
      * значеннями словника, а не реальними секретами - виявлено на
      * OpenSourceBikeShare (109 хибних hardcoded-secret знахідок).
+     * .claude - git worktree-и Claude Code (.claude/worktrees/<назва>/):
+     * повні КОПІЇ того самого проєкту на інших гілках, тож кожна знахідка
+     * дублювалась би за кількістю worktree-ів (на obriy - копії app.js по
+     * ~200 КБ з .claude/worktrees/*).
      */
-    private const SKIP_DIRS = ['.git', 'vendor', 'node_modules', 'data', 'dist', 'build', 'target', 'out', 'var'];
+    private const SKIP_DIRS = ['.git', '.claude', 'vendor', 'node_modules', 'data', 'dist', 'build', 'target', 'out', 'var'];
 
     public function withProvider(LanguageProvider $provider): self
     {

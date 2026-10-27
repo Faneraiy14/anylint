@@ -115,6 +115,11 @@ final class TreeSitterProvidersTest extends AnalyzerTestCase
                 'dead' => "func f(x: Int) -> Int {\n    if x > 0 {\n        return 1\n        dead()\n    }\n    return 0\n}\n",
                 'catch' => "func f() {\n    do {\n        try g()\n    } catch {\n    }\n}\n",
                 'emptyFunc' => "func f() {\n}\n",
+                // Тіло Swift-функції лежить в обгортці function_body: без її
+                // розгортання long-function бачила 0 стейтментів, а коментар
+                // у порожньому тілі не знімав empty-function.
+                'longFunc' => "func f() {\n" . str_repeat("    g()\n", 31) . "}\n",
+                'noFalsePositive' => "func f() {\n    // навмисно порожня\n}\n",
                 // break/continue - той самий тип вузла що й return; перевіряє,
                 // що isReturn() у dump.js справді розрізняє їх за ключовим словом.
                 'clean' => "func f(x: Int) -> Int {\n    for i in 0..<3 {\n        if i == 1 { break }\n        if i == 2 { continue }\n    }\n    return 0\n}\n",
@@ -126,6 +131,11 @@ final class TreeSitterProvidersTest extends AnalyzerTestCase
                 // Go не має try/catch (defer/recover) - структурно нема аналога.
                 'catch' => null,
                 'emptyFunc' => "func f() {\n}\n",
+                // Тіло Swift-функції лежить в обгортці function_body: без її
+                // розгортання long-function бачила 0 стейтментів, а коментар
+                // у порожньому тілі не знімав empty-function.
+                'longFunc' => "func f() {\n" . str_repeat("    g()\n", 31) . "}\n",
+                'noFalsePositive' => "func f() {\n    // навмисно порожня\n}\n",
                 'clean' => "func f(x int) int {\n    if x > 0 {\n        return 1\n    }\n    return 0\n}\n",
             ],
             'Kotlin' => [
@@ -134,6 +144,9 @@ final class TreeSitterProvidersTest extends AnalyzerTestCase
                 'dead' => "fun f(x: Int): Int {\n    if (x > 0) {\n        return 1\n        dead()\n    }\n    return 0\n}\n",
                 'catch' => "fun f() {\n    try {\n        g()\n    } catch (e: Exception) {\n    }\n}\n",
                 'emptyFunc' => "fun f() {\n}\n",
+                'longFunc' => "fun f() {\n" . str_repeat("    g()\n", 31) . "}\n",
+                // Функція-вираз: "{" тут - лямбда, а не порожнє тіло.
+                'noFalsePositive' => "fun f() = run { g() }\n",
                 'clean' => "fun f(x: Int): Int {\n    for (i in 0..1) {\n        if (i == 1) { break }\n        if (i == 2) { continue }\n    }\n    return 0\n}\n",
             ],
             'Ruby' => [
@@ -261,7 +274,12 @@ final class TreeSitterProvidersTest extends AnalyzerTestCase
         }
 
         $f = $this->tempFile($ext, $case['clean']);
-        $dead = $this->findingsFor($analyzer->analyzePath($f), 'dead-code-after-return');
-        $this->assertCount(0, $dead, "clean {$ext} code should produce no false positive");
+        $findings = $analyzer->analyzePath($f);
+        $this->assertCount(0, $this->findingsFor($findings, 'dead-code-after-return'), "clean {$ext} code should produce no false positive");
+        // Функція з тілом - не порожня. Раніше тут перевірявся лише
+        // dead-code, і в Swift/Kotlin КОЖНА функція непомітно ловилась як
+        // порожня (тіло в обгортці function_body, правило бачило
+        // синтезований порожній Block).
+        $this->assertCount(0, $this->findingsFor($findings, 'empty-function'), "clean {$ext} function is not empty");
     }
 }

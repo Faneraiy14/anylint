@@ -102,7 +102,7 @@ const LANG_CONFIG = {
     // continue/fallthrough/throw; розрізнити можна лише за текстом
     // першого (неіменованого) токена-ключового слова.
     isReturn: (n) => n.childCount > 0 && n.type === 'control_transfer_statement' && n.child(0).type === 'return',
-    func: ['function_declaration'],
+    func: ['function_declaration'], funcBodyWrapper: 'function_body',
   },
   go: {
     wasm: 'tree-sitter-go.wasm', block: 'block',
@@ -131,6 +131,7 @@ const LANG_CONFIG = {
     // ДРУГА з них з єдиним if_expression усередині. Лише друга: перша з
     // єдиним if ("if (a) if (b) x()") - справжня вкладеність.
     elseWrapper: 'control_structure_body', elseWrapperIsSecondBody: true,
+    funcBodyWrapper: 'function_body',
   },
   ruby: {
     wasm: 'tree-sitter-ruby.wasm',
@@ -389,6 +390,12 @@ function mapNode(node, isRoot) {
     children = mapTryCatchChildren(node);
   } else if (canonicalType === 'FunctionDecl') {
     children = namedChildren(node).map((c) => mapNode(c, false));
+    const bodyWrapper = cfg.funcBodyWrapper
+      ? children.find((c) => c.type === 'Other' && c.attributes.kind === cfg.funcBodyWrapper)
+      : undefined;
+    if (bodyWrapper) {
+      children = children.map((c) => (c === bodyWrapper ? unwrapFunctionBody(bodyWrapper) : c));
+    }
     // Той самий квірк, що й у CatchClause вище, тут для тіла функції:
     // Ruby "def f\nend" (порожній метод) не породжує вузол body_statement
     // ВЗАГАЛІ, коли тіла нема - без синтезованого Block тут
@@ -404,7 +411,10 @@ function mapNode(node, isRoot) {
     // тексті функції реально Є фігурна дужка (підтверджує "тіло є, воно
     // порожнє") АБО мова взагалі не використовує фігурні дужки й завжди
     // має якесь тіло (Ruby - funcBodyIsImplicit).
-    if (!children.some((c) => c.type === 'Block') && (cfg.funcBodyIsImplicit || node.text.includes('{'))) {
+    // Обгортку тіла (Swift/Kotlin) вже розібрано вище: якщо Block там не
+    // з'явився, це функція-вираз ("fun f() = run { ... }"), а не порожнє
+    // тіло, і "{" у її тексті - дужки лямбди.
+    if (!bodyWrapper && !children.some((c) => c.type === 'Block') && (cfg.funcBodyIsImplicit || node.text.includes('{'))) {
       children.push({ type: 'Block', line, attributes: {}, children: [] });
     }
   } else if (cfg.funcSigIsSibling) {
@@ -448,6 +458,24 @@ function mapNode(node, isRoot) {
     attributes,
     children,
   };
+}
+
+// Swift і Kotlin кладуть тіло функції в обгортку function_body, а не
+// прямою дитиною: function_body -> statements (Block). Без цього
+// EmptyFunctionRule/LongFunctionRule, які шукають ПРЯМУ дитину-Block,
+// бачили лише синтезований порожній Block, і КОЖНА функція цих мов
+// ловилась як порожня. Порожнє тіло ("func f() {}") не має statements
+// узагалі - тоді Block будується з того, що в обгортці є (коментарі), а
+// тіло-вираз Kotlin ("= expr") лишається як є: це не порожня функція.
+function unwrapFunctionBody(wrapper) {
+  const block = wrapper.children.find((c) => c.type === 'Block');
+  if (block) {
+    return block;
+  }
+  if (wrapper.children.every((c) => c.type === 'Other' && c.attributes.kind === 'comment')) {
+    return { type: 'Block', line: wrapper.line, attributes: {}, children: wrapper.children };
+  }
+  return wrapper;
 }
 
 // Діти, що прийшли з elif_clause/elseif_clause (WeakSet, а не поле у

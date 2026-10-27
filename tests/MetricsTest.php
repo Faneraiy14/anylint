@@ -7,6 +7,8 @@ namespace Tests;
 use AnyLint\Metrics\Complexity;
 use AnyLint\Config;
 use AnyLint\LanguageProvider;
+use AnyLint\Providers\AbstractJsFamilyProvider;
+use AnyLint\Providers\AbstractTreeSitterProvider;
 use AnyLint\Providers\NyxilumProvider;
 use AnyLint\Providers\PhpProvider;
 
@@ -164,6 +166,12 @@ final class MetricsTest extends AnalyzerTestCase
                 if ($provider instanceof NyxilumProvider && !self::nxAvailable()) {
                     $this->markTestSkipped('nx недоступний (NX_EXE не задано чи не в PATH)');
                 }
+                // Так само без "npm install" у теці dump.js (нічна збірка CI).
+                $module = $provider instanceof AbstractJsFamilyProvider ? ['js-ast-dump', 'typescript']
+                    : ($provider instanceof AbstractTreeSitterProvider ? ['treesitter-ast-dump', 'web-tree-sitter'] : null);
+                if ($module !== null && !self::nodeModuleAvailable($nodeExe, ...$module)) {
+                    $this->markTestSkipped("{$module[1]} не встановлено (npm install у tools/{$module[0]})");
+                }
                 return $provider;
             }
         }
@@ -172,7 +180,19 @@ final class MetricsTest extends AnalyzerTestCase
 
     private static function nxAvailable(): bool
     {
-        $process = @proc_open([getenv('NX_EXE') ?: 'nx', '--version'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        return self::succeeds([getenv('NX_EXE') ?: 'nx', '--version']);
+    }
+
+    private static function nodeModuleAvailable(string $nodeExe, string $toolDir, string $module): bool
+    {
+        $dir = __DIR__ . '/../tools/' . $toolDir;
+        return self::succeeds([$nodeExe, '-e', 'require.resolve(' . json_encode($module) . ', {paths: [' . json_encode($dir) . ']})']);
+    }
+
+    /** @param list<string> $command */
+    private static function succeeds(array $command): bool
+    {
+        $process = @proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (!is_resource($process)) {
             return false;
         }

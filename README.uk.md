@@ -75,7 +75,7 @@ jobs:
   anylint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Faneraiy14/anylint@main
         with:
           path: src          # типово: увесь репозиторій

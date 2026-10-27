@@ -66,7 +66,7 @@ runs:
 
     - name: Set up Node.js
       if: inputs.node == 'true'
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '22'
 
@@ -122,7 +122,7 @@ runs:
 
     - name: Upload SARIF to Code Scanning
       if: inputs.sarif == 'true'
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ steps.sarif.outputs.file }}
         category: anylint
@@ -148,7 +148,7 @@ runs:
 
     - name: Upload report
       if: inputs.report == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: anylint-report
         path: ${{ steps.report.outputs.file }}

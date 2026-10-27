@@ -1,4 +1,4 @@
-name: anylint
+name: anylint static analysis
 description: Cross-language static analysis (PHP, JS/TS and 15 tree-sitter languages) with PR annotations, SARIF and an HTML report.
 author: Faneraiy14
 branding:

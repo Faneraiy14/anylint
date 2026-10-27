@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace AnyLint\Providers;
 
 use AnyLint\Ast\Node;
-use AnyLint\LanguageProvider;
+use AnyLint\ExternalToolProvider;
 
 /**
  * "Доказ" того, що архітектура плагінів справді крос-мовна, а не лише
@@ -20,7 +20,7 @@ use AnyLint\LanguageProvider;
  * NyxilumLang, щоб не дублювати логіку "що є Block/Return/CatchClause" у
  * двох різних мовах реалізації.
  */
-final class NyxilumProvider implements LanguageProvider
+final class NyxilumProvider implements ExternalToolProvider
 {
     public function __construct(
         private readonly string $nxExecutable = 'nx',
@@ -35,6 +35,28 @@ final class NyxilumProvider implements LanguageProvider
     public function supports(string $filePath): bool
     {
         return str_ends_with($filePath, '.nx');
+    }
+
+    /**
+     * Шлях + час зміни + розмір бінарника nx: перезбірка NyxilumLang
+     * (нова версія "nx ast") змінює їх, і кеш перестає віддавати старе AST.
+     */
+    public function toolFingerprint(): string
+    {
+        $binary = $this->nxExecutable;
+        if (!str_contains($binary, '/') && !str_contains($binary, '\\')) {
+            foreach (explode(PATH_SEPARATOR, (string) getenv('PATH')) as $dir) {
+                if ($dir !== '' && is_file($dir . DIRECTORY_SEPARATOR . $binary)) {
+                    $binary = $dir . DIRECTORY_SEPARATOR . $binary;
+                    break;
+                }
+            }
+        }
+        $real = realpath($binary);
+        if ($real === false) {
+            return $this->nxExecutable . ':missing';
+        }
+        return $real . ':' . (int) @filemtime($real) . ':' . (int) @filesize($real);
     }
 
     public function parse(string $filePath): Node

@@ -30,44 +30,28 @@ abstract class AbstractJsFamilyProvider implements LanguageProvider
 
     public function parse(string $filePath): Node
     {
-        $process = proc_open(
-            [$this->nodeExecutable, $this->dumpScriptPath(), $filePath],
-            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-            $pipes,
-        );
-        if ($process === false) {
-            throw new \RuntimeException("Не вдалось запустити '{$this->nodeExecutable}' - переконайся, що Node.js у PATH.");
-        }
+        // Один спільний node-процес на весь прогін (див. NodeWorker), а не
+        // окремий запуск на кожен файл.
+        $response = NodeWorker::shared($this->nodeExecutable, $this->dumpScriptPath())
+            ->request(['file' => $filePath]);
 
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exitCode = proc_close($process);
-
-        // Код виходу 3 - навмисний сигнал від dump.js "це справжня
+        // Код 3 - навмисний сигнал від dump.js "це справжня
         // синтаксична помилка в аналізованому файлі" (ts.SourceFile.
         // parseDiagnostics непорожній). Будь-який інший ненульовий код -
         // проблема самого інструментарію (типово: "Cannot find module
         // 'typescript'", бо в tools/js-ast-dump/ не було 'npm install'),
         // а не файлу, що аналізується - повідомлення про це не мало б
         // звучати як "у твоєму коді синтаксична помилка".
-        if ($exitCode === 3) {
-            throw new \RuntimeException("Синтаксична помилка у {$filePath}: " . trim($stdout . $stderr));
+        if ($response['code'] === 3) {
+            throw new \RuntimeException("Синтаксична помилка у {$filePath}: " . ($response['error'] ?? ''));
         }
-        if ($exitCode !== 0) {
+        if ($response['code'] !== 0 || !isset($response['ast'])) {
             throw new \RuntimeException(
-                "Не вдалось розібрати {$filePath} через 'node dump.js': " . trim($stdout . $stderr)
-                . "\nПеревір, що в " . \dirname($this->dumpScriptPath()) . " виконано 'npm install'.",
+                "Не вдалось розібрати {$filePath} через 'node dump.js': " . ($response['error'] ?? 'порожня відповідь'),
             );
         }
 
-        $decoded = json_decode((string) $stdout, true);
-        if (!is_array($decoded)) {
-            throw new \RuntimeException("'{$this->nodeExecutable} " . $this->dumpScriptPath() . "' повернув невалідний JSON для {$filePath}");
-        }
-
-        return $this->toNode($decoded);
+        return $this->toNode($response['ast']);
     }
 
     /**

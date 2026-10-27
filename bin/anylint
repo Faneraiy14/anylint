@@ -10,6 +10,8 @@ use AnyLint\Baseline;
 use AnyLint\Config;
 use AnyLint\Finding;
 use AnyLint\Fixer;
+use AnyLint\ParallelRunner;
+use AnyLint\ResultCache;
 use AnyLint\Formatters\CheckstyleFormatter;
 use AnyLint\Formatters\SarifFormatter;
 use AnyLint\Providers\CProvider;
@@ -47,7 +49,7 @@ use AnyLint\Severity;
 $args = array_slice($argv, 1);
 
 if (in_array('--help', $args, true) || $args === []) {
-    echo "anylint <шлях> [--json|--checkstyle|--sarif] [--fix] [--no-todo]\n";
+    echo "anylint <шлях> [--json|--checkstyle|--sarif] [--fix] [--no-todo] [--jobs <N>] [--no-cache]\n";
     echo "        [--config <файл>] [--no-config] [--baseline <файл>] [--generate-baseline]\n";
     echo "  Кросплатформний статичний аналізатор з архітектурою плагінів під мови.\n";
     echo "  Мови: PHP, NyxilumLang, JavaScript, TypeScript, C, C++, C#, Java, Python, Rust, Swift, Go,\n";
@@ -61,6 +63,10 @@ if (in_array('--help', $args, true) || $args === []) {
     echo "  --baseline <файл>: не показувати знахідки, прийняті в цьому файлі\n";
     echo "                (або \"baseline\" у конфігу).\n";
     echo "  --generate-baseline: записати всі поточні знахідки в baseline і вийти з 0.\n";
+    echo "  --jobs <N|auto>: скільки процесів аналізують паралельно (типово 1; auto -\n";
+    echo "                кількість ядер; без розширення pcntl завжди послідовно).\n";
+    echo "  --no-cache:   не використовувати кеш результатів (типово незмінені файли не\n";
+    echo "                розбираються вдруге; кеш - у системній тимчасовій теці).\n";
     exit(0);
 }
 
@@ -71,16 +77,17 @@ $fix = in_array('--fix', $args, true);
 $noTodo = in_array('--no-todo', $args, true);
 $noConfig = in_array('--no-config', $args, true);
 $generateBaseline = in_array('--generate-baseline', $args, true);
+$noCache = in_array('--no-cache', $args, true);
 
 /** @var array<string, string|null> $values опції зі значенням: --name <v> або --name=<v> */
-$values = ['--config' => null, '--baseline' => null];
+$values = ['--config' => null, '--baseline' => null, '--jobs' => null];
 $path = null;
 for ($i = 0; $i < count($args); $i++) {
     $arg = $args[$i];
     if (array_key_exists($arg, $values)) {
         $value = $args[++$i] ?? null;
         if ($value === null) {
-            fwrite(STDERR, "{$arg} потребує шляху до файлу.\n");
+            fwrite(STDERR, "{$arg} потребує значення.\n");
             exit(2);
         }
         $values[$arg] = $value;
@@ -97,12 +104,26 @@ for ($i = 0; $i < count($args); $i++) {
     }
 }
 $configFile = $values['--config'];
+// Типово послідовно: на 2-ядерній машині під навантаженням кожен додатковий
+// процес лише платить ще раз за старт node (~0.6 с на require('typescript'))
+// і прогін стає ПОВІЛЬНІШИМ (виміряно: 7.7 с -> 8.3 с з --jobs 4).
+$jobs = 1;
+if ($values['--jobs'] === 'auto') {
+    $jobs = ParallelRunner::cpuCount();
+} elseif ($values['--jobs'] !== null) {
+    if (!ctype_digit($values['--jobs']) || (int) $values['--jobs'] < 1) {
+        fwrite(STDERR, "--jobs очікує ціле число >= 1 або auto.\n");
+        exit(2);
+    }
+    $jobs = (int) $values['--jobs'];
+}
 if ($path === null) {
     fwrite(STDERR, "Не вказано шлях для аналізу.\n");
     exit(2);
 }
 
 $analyzer = (new Analyzer())
+    ->withJobs($jobs)
     ->withProvider(new PhpProvider())
     // NX_EXE - шлях до бінарника Nx, якщо він не в PATH під іменем "nx"
     // (типово при локальній збірці з вихідників, а не встановленого CLI).
@@ -154,6 +175,9 @@ try {
     };
     if ($config !== null) {
         $analyzer->withConfig($config);
+    }
+    if (!$noCache) {
+        $analyzer->withCache(ResultCache::defaultFile($path));
     }
     $findings = $analyzer->analyzePath($path);
 

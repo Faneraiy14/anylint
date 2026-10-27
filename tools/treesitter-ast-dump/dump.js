@@ -227,21 +227,12 @@ const LANG_CONFIG = {
   },
 };
 
-const lang = process.argv[2];
-const filePath = process.argv[3];
-const cfg = LANG_CONFIG[lang];
-if (!cfg || !filePath) {
-  process.stderr.write(`Використання: node dump.js <${Object.keys(LANG_CONFIG).join('|')}> <файл>\n`);
-  process.exit(2);
-}
-
-let source;
-try {
-  source = fs.readFileSync(filePath, 'utf8');
-} catch (e) {
-  process.stderr.write(`Не вдалось прочитати файл: ${e.message}\n`);
-  process.exit(2);
-}
+// Конфіг мови ПОТОЧНОГО файлу. Модульна змінна, а не параметр кожної
+// функції нижче: у режимі --serve один процес по черзі розбирає файли
+// різних мов, і запити обробляються строго послідовно (наступний рядок
+// stdin читається лише після відповіді на попередній), тож перепризначати
+// її перед кожним файлом безпечно.
+let cfg = null;
 
 function matchesBlock(type) {
   return Array.isArray(cfg.block) ? cfg.block.includes(type) : type === cfg.block;
@@ -564,18 +555,82 @@ function findNamedChild(node, predicate) {
   return null;
 }
 
-(async () => {
-  await Parser.init();
-  const wasmPath = require.resolve(`tree-sitter-wasms/out/${cfg.wasm}`);
-  const Lang = await Language.load(wasmPath);
-  const parser = new Parser();
-  parser.setLanguage(Lang);
-  const tree = parser.parse(source);
+// Parser.init() і завантаження .wasm-граматики - дорожча частина запуску;
+// у --serve робимо це один раз на процес (і один раз на мову), а не на
+// кожен файл.
+let parserReady = null;
+const languages = new Map();
 
-  if (tree.rootNode.hasError) {
-    process.stderr.write(`Parse Error: у файлі ${filePath} є синтаксична помилка (tree-sitter не зміг розібрати цю ділянку коду).\n`);
-    process.exit(3);
+async function parserFor(langName) {
+  if (parserReady === null) {
+    parserReady = Parser.init();
+  }
+  await parserReady;
+  if (!languages.has(langName)) {
+    const wasmPath = require.resolve(`tree-sitter-wasms/out/${LANG_CONFIG[langName].wasm}`);
+    const parser = new Parser();
+    parser.setLanguage(await Language.load(wasmPath));
+    languages.set(langName, parser);
+  }
+  return languages.get(langName);
+}
+
+// Ті самі коди, що й код виходу в одноразовому режимі: 0 - успіх,
+// 2 - проблема запуску/читання, 3 - справжня синтаксична помилка у файлі.
+async function dumpFile(langName, filePath) {
+  if (!LANG_CONFIG[langName] || !filePath) {
+    return { code: 2, error: `Використання: node dump.js <${Object.keys(LANG_CONFIG).join('|')}> <файл>` };
+  }
+  let source;
+  try {
+    source = fs.readFileSync(filePath, 'utf8');
+  } catch (e) {
+    return { code: 2, error: `Не вдалось прочитати файл: ${e.message}` };
   }
 
-  process.stdout.write(JSON.stringify(mapNode(tree.rootNode, true)));
+  cfg = LANG_CONFIG[langName];
+  const tree = (await parserFor(langName)).parse(source);
+  try {
+    if (tree.rootNode.hasError) {
+      return { code: 3, error: `Parse Error: у файлі ${filePath} є синтаксична помилка (tree-sitter не зміг розібрати цю ділянку коду).` };
+    }
+    return { code: 0, ast: mapNode(tree.rootNode, true) };
+  } finally {
+    // WASM-пам'ять дерева не звільняється збирачем сміття JS - без
+    // delete() довгоживучий --serve процес ріс би з кожним файлом.
+    tree.delete();
+  }
+}
+
+// --serve: один процес на весь прогін anylint. Запит - рядок JSON
+// {"lang": "...", "file": "..."}, відповідь - рядок JSON {"code", "ast"}
+// або {"code", "error"}. Помилка в одному файлі не валить процес.
+async function serve() {
+  const rl = require('readline').createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (line.trim() === '') {
+      continue;
+    }
+    let response;
+    try {
+      const request = JSON.parse(line);
+      response = await dumpFile(request.lang, request.file);
+    } catch (e) {
+      response = { code: 2, error: `Внутрішня помилка dump.js: ${e && e.stack ? e.stack : e}` };
+    }
+    process.stdout.write(JSON.stringify(response) + '\n');
+  }
+}
+
+(async () => {
+  if (process.argv[2] === '--serve') {
+    await serve();
+    return;
+  }
+  const result = await dumpFile(process.argv[2], process.argv[3]);
+  if (result.code !== 0) {
+    process.stderr.write(result.error + '\n');
+    process.exit(result.code);
+  }
+  process.stdout.write(JSON.stringify(result.ast));
 })();

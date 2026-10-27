@@ -27,6 +27,12 @@ final class Analyzer
 
     private ?PathMatcher $excluded = null;
 
+    /** Скільки процесів аналізують файли паралельно (див. ParallelRunner); 1 - послідовно. */
+    private int $jobs = 1;
+
+    /** Файл кешу результатів (див. ResultCache); null - без кешу. */
+    private ?string $cacheFile = null;
+
     /**
      * Знахідки, які створює сам Analyzer, а не якесь правило - їх теж
      * можна вимкнути/перевизначити в конфігу чи директивою (напр.
@@ -59,6 +65,18 @@ final class Analyzer
         return $this;
     }
 
+    public function withJobs(int $jobs): self
+    {
+        $this->jobs = max(1, $jobs);
+        return $this;
+    }
+
+    public function withCache(?string $cacheFile): self
+    {
+        $this->cacheFile = $cacheFile;
+        return $this;
+    }
+
     public function withConfig(Config $config): self
     {
         $this->config = $config;
@@ -75,13 +93,13 @@ final class Analyzer
         $this->applyConfig();
 
         if (is_file($path)) {
-            return $this->isExcluded($path) ? [] : $this->analyzeFile($path);
+            return $this->isExcluded($path) ? [] : $this->analyzeFiles([$path]);
         }
         if (!is_dir($path)) {
             throw new \RuntimeException("Шлях не існує: {$path}");
         }
 
-        $findings = [];
+        $files = [];
         /** @var iterable<\SplFileInfo> $iterator */
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
@@ -93,10 +111,97 @@ final class Analyzer
                 }
             }
             if ($fileInfo->isFile() && !$this->isExcluded($fileInfo->getPathname())) {
-                $findings = [...$findings, ...$this->analyzeFile($fileInfo->getPathname())];
+                $files[] = $fileInfo->getPathname();
             }
         }
-        return $findings;
+
+        // Порядок обходу RecursiveDirectoryIterator - це порядок записів у
+        // теці файлової системи, і він змінюється навіть від перезапису
+        // файлу. Без сортування той самий код давав би знахідки в різному
+        // порядку від запуску до запуску (стрибаючі diff-и SARIF/звітів).
+        sort($files, SORT_STRING);
+
+        return $this->analyzeFiles($files);
+    }
+
+    /**
+     * @param list<string> $files
+     * @return Finding[]
+     */
+    private function analyzeFiles(array $files): array
+    {
+        $cache = $this->cacheFile !== null ? ResultCache::open($this->cacheFile, $this->fingerprint()) : null;
+
+        /** @var array<int, Finding[]> $perFile */
+        $perFile = [];
+        /** @var array<int, string> $keys індекс файлу => ключ кешу */
+        $keys = [];
+        $misses = [];
+        foreach ($files as $index => $file) {
+            $source = $cache === null ? false : @file_get_contents($file);
+            if ($cache !== null && $source !== false) {
+                $keys[$index] = ResultCache::key($file, $source);
+                $hit = $cache->get($keys[$index]);
+                if ($hit !== null) {
+                    $perFile[$index] = $hit;
+                    continue;
+                }
+            }
+            $misses[$index] = $file;
+        }
+
+        $analyze = fn (string $file): array => $this->analyzeFile($file);
+        $missFiles = array_values($misses);
+        $missResults = ParallelRunner::run($missFiles, $this->jobs, $analyze) ?? array_map($analyze, $missFiles);
+        foreach (array_keys($misses) as $i => $index) {
+            $findings = $missResults[$i] ?? [];
+            $perFile[$index] = $findings;
+            if ($cache !== null && isset($keys[$index]) && $this->isCacheable($findings)) {
+                $cache->put($keys[$index], $findings);
+            }
+        }
+        $cache?->save();
+
+        ksort($perFile);
+        // array_merge одним викликом, а не [...$findings, ...$new] у циклі -
+        // те копіювало весь накопичений масив на кожному файлі (O(n^2)).
+        return $perFile === [] ? [] : array_merge(...array_values($perFile));
+    }
+
+    /**
+     * parse-error/unreadable-file НЕ кешуються: вони можуть означати не
+     * "файл зламаний", а "node/nx не встановлено" чи "немає прав" - після
+     * виправлення оточення кеш віддавав би стару помилку для незміненого
+     * файлу.
+     *
+     * @param Finding[] $findings
+     */
+    private function isCacheable(array $findings): bool
+    {
+        foreach ($findings as $finding) {
+            if (in_array($finding->rule, self::BUILTIN_RULES, true)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Усе, від чого залежить результат, окрім вмісту самого файлу: код
+     * anylint, які правила й провайдери активні, їхні опції, severity з
+     * конфігу, версії зовнішніх інструментів.
+     */
+    private function fingerprint(): string
+    {
+        $parts = [ResultCache::codeFingerprint(), PHP_VERSION];
+        foreach ($this->activeRules as $rule) {
+            $parts[] = $rule::class . ':' . $rule->name();
+        }
+        foreach ($this->providers as $provider) {
+            $parts[] = $provider::class . ($provider instanceof ExternalToolProvider ? ':' . $provider->toolFingerprint() : '');
+        }
+        $parts[] = serialize([$this->config?->severities, $this->config?->options]);
+        return sha1(implode("\n", $parts));
     }
 
     /** @return Finding[] */

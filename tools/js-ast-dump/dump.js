@@ -18,43 +18,59 @@
 const ts = require('typescript');
 const fs = require('fs');
 
-const filePath = process.argv[2];
-if (!filePath) {
-  process.stderr.write('Використання: node dump.js <файл.js|.ts|...>\n');
-  process.exit(2);
-}
+// Поточний файл. Модульна змінна, а не параметр кожної функції нижче: у
+// режимі --serve один процес по черзі розбирає багато файлів, запити
+// обробляються строго послідовно, тож перепризначати її перед кожним
+// файлом безпечно. Сам require('typescript') (~0.6 с - майже вся ціна
+// одноразового запуску) у --serve відбувається лише раз.
+let sourceFile = null;
 
-let source;
-try {
-  source = fs.readFileSync(filePath, 'utf8');
-} catch (e) {
-  process.stderr.write(`Не вдалось прочитати файл: ${e.message}\n`);
-  process.exit(2);
-}
+// Ті самі коди, що й код виходу в одноразовому режимі: 0 - успіх,
+// 2 - проблема запуску/читання, 3 - справжня синтаксична помилка у файлі.
+function dumpFile(filePath) {
+  if (!filePath) {
+    return { code: 2, error: 'Використання: node dump.js <файл.js|.ts|...>' };
+  }
+  let source;
+  try {
+    source = fs.readFileSync(filePath, 'utf8');
+  } catch (e) {
+    return { code: 2, error: `Не вдалось прочитати файл: ${e.message}` };
+  }
 
-const isTsx = filePath.endsWith('.tsx') || filePath.endsWith('.jsx');
-const scriptKind = isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const isTsx = filePath.endsWith('.tsx') || filePath.endsWith('.jsx');
+  const scriptKind = isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
 
-const sourceFile = ts.createSourceFile(
-  filePath,
-  source,
-  ts.ScriptTarget.Latest,
-  /* setParentNodes */ true,
-  scriptKind,
-);
+  sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    scriptKind,
+  );
 
-// Синтаксична помилка в межах TS-парсера не кидає виняток - вона осідає
-// в sourceFile.parseDiagnostics. PhpProvider для аналогічного випадку
-// кидає RuntimeException із текстом помилки (перетворюється на
-// parse-error Finding в Analyzer), тому тут - той самий контракт: код
-// виходу 3 + повідомлення в stderr, а не мовчазне "порожнє" AST.
-const diagnostics = sourceFile.parseDiagnostics || [];
-if (diagnostics.length > 0) {
-  const first = diagnostics[0];
-  const { line } = sourceFile.getLineAndCharacterOfPosition(first.start || 0);
-  const message = ts.flattenDiagnosticMessageText(first.messageText, '\n');
-  process.stderr.write(`Parse Error: рядок ${line + 1}: ${message}\n`);
-  process.exit(3);
+  // Синтаксична помилка в межах TS-парсера не кидає виняток - вона осідає
+  // в sourceFile.parseDiagnostics. PhpProvider для аналогічного випадку
+  // кидає RuntimeException із текстом помилки (перетворюється на
+  // parse-error Finding в Analyzer), тому тут - той самий контракт: код
+  // 3 + повідомлення, а не мовчазне "порожнє" AST.
+  const diagnostics = sourceFile.parseDiagnostics || [];
+  if (diagnostics.length > 0) {
+    const first = diagnostics[0];
+    const { line } = sourceFile.getLineAndCharacterOfPosition(first.start || 0);
+    const message = ts.flattenDiagnosticMessageText(first.messageText, '\n');
+    return { code: 3, error: `Parse Error: рядок ${line + 1}: ${message}` };
+  }
+
+  return {
+    code: 0,
+    ast: {
+      type: 'Root',
+      line: 1,
+      attributes: {},
+      children: [mapStatementList(sourceFile.statements, 1)],
+    },
+  };
 }
 
 function lineOf(node) {
@@ -165,11 +181,32 @@ function collectChildren(node) {
   return children;
 }
 
-const root = {
-  type: 'Root',
-  line: 1,
-  attributes: {},
-  children: [mapStatementList(sourceFile.statements, 1)],
-};
+// --serve: один процес на весь прогін anylint. Запит - рядок JSON
+// {"file": "..."}, відповідь - рядок JSON {"code", "ast"} або
+// {"code", "error"}. Помилка в одному файлі не валить процес.
+async function serve() {
+  const rl = require('readline').createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (line.trim() === '') {
+      continue;
+    }
+    let response;
+    try {
+      response = dumpFile(JSON.parse(line).file);
+    } catch (e) {
+      response = { code: 2, error: `Внутрішня помилка dump.js: ${e && e.stack ? e.stack : e}` };
+    }
+    process.stdout.write(JSON.stringify(response) + '\n');
+  }
+}
 
-process.stdout.write(JSON.stringify(root));
+if (process.argv[2] === '--serve') {
+  serve();
+} else {
+  const result = dumpFile(process.argv[2]);
+  if (result.code !== 0) {
+    process.stderr.write(result.error + '\n');
+    process.exit(result.code);
+  }
+  process.stdout.write(JSON.stringify(result.ast));
+}

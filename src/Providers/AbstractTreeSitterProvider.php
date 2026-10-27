@@ -27,12 +27,54 @@ abstract class AbstractTreeSitterProvider implements LanguageProvider
     /** Ідентифікатор мови для LANG_CONFIG у dump.js: c/cpp/c_sharp/java. */
     abstract protected function treeSitterLang(): string;
 
+    /**
+     * false - мова не може жити в спільному довгоживучому процесі, і кожен
+     * файл розбирається окремим одноразовим "node dump.js <мова> <файл>"
+     * (див. LuaProvider). Повільніше (~0.2 с на файл), але коректно.
+     */
+    protected function usesPersistentWorker(): bool
+    {
+        return true;
+    }
+
     private function dumpScriptPath(): string
     {
         return __DIR__ . '/../../tools/treesitter-ast-dump/dump.js';
     }
 
     public function parse(string $filePath): Node
+    {
+        // Один спільний node-процес на весь прогін (див. NodeWorker), а не
+        // окремий запуск на кожен файл.
+        $response = $this->usesPersistentWorker()
+            ? NodeWorker::shared($this->nodeExecutable, $this->dumpScriptPath())
+                ->request(['lang' => $this->treeSitterLang(), 'file' => $filePath])
+            : $this->runOnce($filePath);
+
+        // Код 3 - навмисний сигнал від dump.js "це справжня
+        // синтаксична помилка в аналізованому файлі" (tree.rootNode.
+        // hasError). Будь-який інший ненульовий код - проблема самого
+        // інструментарію (типово: не виконано 'npm install' у
+        // tools/treesitter-ast-dump/), а не файлу, що аналізується.
+        if ($response['code'] === 3) {
+            throw new \RuntimeException("Синтаксична помилка у {$filePath}: " . ($response['error'] ?? ''));
+        }
+        if ($response['code'] !== 0 || !isset($response['ast'])) {
+            throw new \RuntimeException(
+                "Не вдалось розібрати {$filePath} через 'node dump.js': " . ($response['error'] ?? 'порожня відповідь'),
+            );
+        }
+
+        return $this->toNode($response['ast']);
+    }
+
+    /**
+     * Одноразовий запуск dump.js на один файл - та сама форма відповіді,
+     * що й у NodeWorker::request(), щоб parse() не розрізняв два шляхи.
+     *
+     * @return array{code: int, ast?: array<mixed>, error?: string}
+     */
+    private function runOnce(string $filePath): array
     {
         $process = proc_open(
             [$this->nodeExecutable, $this->dumpScriptPath(), $this->treeSitterLang(), $filePath],
@@ -42,34 +84,21 @@ abstract class AbstractTreeSitterProvider implements LanguageProvider
         if ($process === false) {
             throw new \RuntimeException("Не вдалось запустити '{$this->nodeExecutable}' - переконайся, що Node.js у PATH.");
         }
-
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
-        $exitCode = proc_close($process);
+        $code = proc_close($process);
 
-        // Код виходу 3 - навмисний сигнал від dump.js "це справжня
-        // синтаксична помилка в аналізованому файлі" (tree.rootNode.
-        // hasError). Будь-який інший ненульовий код - проблема самого
-        // інструментарію (типово: не виконано 'npm install' у
-        // tools/treesitter-ast-dump/), а не файлу, що аналізується.
-        if ($exitCode === 3) {
-            throw new \RuntimeException("Синтаксична помилка у {$filePath}: " . trim($stdout . $stderr));
+        $ast = $code === 0 ? json_decode($stdout, true) : null;
+        if (is_array($ast)) {
+            return ['code' => 0, 'ast' => $ast];
         }
-        if ($exitCode !== 0) {
-            throw new \RuntimeException(
-                "Не вдалось розібрати {$filePath} через 'node dump.js': " . trim($stdout . $stderr)
-                . "\nПеревір, що в " . \dirname($this->dumpScriptPath()) . " виконано 'npm install'.",
-            );
+        $error = trim($stdout . $stderr);
+        if ($code !== 3) {
+            $error .= "\nПеревір, що в " . \dirname($this->dumpScriptPath()) . " виконано 'npm install'.";
         }
-
-        $decoded = json_decode((string) $stdout, true);
-        if (!is_array($decoded)) {
-            throw new \RuntimeException("'{$this->nodeExecutable} " . $this->dumpScriptPath() . "' повернув невалідний JSON для {$filePath}");
-        }
-
-        return $this->toNode($decoded);
+        return ['code' => $code === 0 ? 2 : $code, 'error' => $error];
     }
 
     /**

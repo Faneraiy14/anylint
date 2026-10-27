@@ -59,9 +59,18 @@ php bin/anylint src --checkstyle # Checkstyle XML — PhpStorm/other JetBrains I
 php bin/anylint src --no-todo   # skip the todo-tracker
 php bin/anylint src --sarif     # SARIF 2.1.0 — GitHub Code Scanning, GitLab, Azure DevOps
 php bin/anylint src --fix       # apply auto-fixes, then report what is left
+php bin/anylint src --no-cache  # ignore the result cache
+php bin/anylint src --jobs auto # analyze in parallel (one process per CPU core)
 ```
 
 Exit codes: `0` no findings, `1` findings, `2` usage/config error.
+
+## Speed
+
+- **One long-lived Node.js process per dumper**, not one per file. Starting `node` and loading the TypeScript compiler cost ~0.6 s per JS/TS file before; the dumpers now run with `--serve` (one JSON request per line on stdin, one JSON response per line on stdout) and `NodeWorker` keeps the process for the whole run. Measured on a real project (162 JS + 18 Java + 44 PHP files): **125 s → 7.2 s**, with byte-identical findings. Exception: Lua. Its tree-sitter grammar parses only the *first* file in a process correctly (every later parse reports a false syntax error), so Lua files still get a one-shot `node` each.
+- **Result cache**: a file that hasn't changed isn't parsed again — the same project re-runs in **0.35 s**. The cache lives in the system temp directory (one file per analyzed root, like PHPStan), so nothing appears in your repo. It's tied to anylint's own code, the rule set, options and severities, and the external tool versions (`nx`); changing any of them drops it entirely. `parse-error` results are never cached (they may mean "node isn't installed" rather than "the file is broken"). `--no-cache` disables it.
+- **`--jobs <N|auto>`** analyzes in N parallel processes (`pcntl_fork`, a dynamic work queue, findings in the same order as a sequential run). It's **off by default**: on the 2-core laptop it was developed on, every extra process pays the Node startup again, and the run got slower (7.7 s → 8.3 s with 4 jobs) — the CPU had no idle cores to give. Try it on a machine with free cores. Without the `pcntl` extension (e.g. Windows) it silently runs sequentially.
+- Files are analyzed in sorted path order, so output is stable between runs.
 
 ## Configuration
 
@@ -158,6 +167,8 @@ tools/treesitter-ast-dump/dump.js  — tree-sitter (15 languages, LANG_CONFIG) -
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (for --checkstyle)
   Formatters/SarifFormatter.php — Finding[] -> SARIF 2.1.0 (for --sarif)
   Baseline.php, Fixer.php — --generate-baseline/--baseline, --fix
+  ResultCache.php, ParallelRunner.php — result cache, --jobs
+  Providers/NodeWorker.php — one long-lived `node dump.js --serve` per dumper
   Config.php, PathMatcher.php — anylint.json loading/validation, exclude globs
   Suppressions.php        — anylint-disable-* comment directives, applied centrally for every rule
   Analyzer.php            — file traversal, provider selection, running the rules

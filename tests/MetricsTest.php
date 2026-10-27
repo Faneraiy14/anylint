@@ -157,19 +157,29 @@ final class MetricsTest extends AnalyzerTestCase
 
         foreach ($candidates as $provider) {
             if ($provider->supports($file)) {
-                try {
-                    $provider->parse($file);
-                } catch (\RuntimeException $e) {
-                    // Як в інших тестах провайдерів: без node/npm install чи
-                    // nx (CI без сестринського репозиторію) - skip, не провал.
-                    if (preg_match('/PATH|npm install|не вдалось запустити/u', $e->getMessage()) === 1) {
-                        $this->markTestSkipped($e->getMessage());
-                    }
-                    throw $e;
+                // Як у NyxilumProviderTest: без nx (CI без сестринського
+                // репозиторію NyxilumLang) - skip, не провал. Сам провайдер
+                // цього не розрізнить: proc_open "вдається" й без бінарника,
+                // а код виходу 127 виглядає як синтаксична помилка.
+                if ($provider instanceof NyxilumProvider && !self::nxAvailable()) {
+                    $this->markTestSkipped('nx недоступний (NX_EXE не задано чи не в PATH)');
                 }
                 return $provider;
             }
         }
         $this->fail("Нема провайдера для {$file}");
+    }
+
+    private static function nxAvailable(): bool
+    {
+        $process = @proc_open([getenv('NX_EXE') ?: 'nx', '--version'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (!is_resource($process)) {
+            return false;
+        }
+        foreach ($pipes as $pipe) {
+            stream_get_contents($pipe);
+            fclose($pipe);
+        }
+        return proc_close($process) === 0;
     }
 }

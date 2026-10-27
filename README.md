@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Faneraiy14/anylint@main
+      - uses: Faneraiy14/anylint@v1
         with:
           path: src          # default: the whole repository
           args: --no-todo    # extra CLI arguments, anylint.json is picked up anyway

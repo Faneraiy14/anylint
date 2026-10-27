@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Faneraiy14/anylint@main
+      - uses: Faneraiy14/anylint@v1
         with:
           path: src          # типово: увесь репозиторій
           args: --no-todo    # додаткові аргументи CLI, anylint.json підхоплюється й так

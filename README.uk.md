@@ -58,12 +58,43 @@ php bin/anylint src --checkstyle # Checkstyle XML — PhpStorm та інші Jet
                                  # це нативно через File Watcher, без окремого плагіна
 php bin/anylint src --no-todo   # без todo-tracker
 php bin/anylint src --sarif     # SARIF 2.1.0 — GitHub Code Scanning, GitLab, Azure DevOps
+php bin/anylint src --github    # анотації GitHub Actions (видно в диффі PR)
 php bin/anylint src --fix       # застосувати автовиправлення, далі показати решту
 php bin/anylint src --no-cache  # без кешу результатів
 php bin/anylint src --jobs auto # паралельно (процес на кожне ядро)
 ```
 
 Коди виходу: `0` знахідок нема, `1` є знахідки, `2` помилка запуску чи конфігу.
+
+## GitHub Action
+
+```yaml
+name: anylint
+on: [push, pull_request]
+jobs:
+  anylint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Faneraiy14/anylint@main
+        with:
+          path: src          # типово: увесь репозиторій
+          args: --no-todo    # додаткові аргументи CLI, anylint.json підхоплюється й так
+```
+
+Знахідки з'являються анотаціями прямо в диффі PR — це працює в будь-якому репозиторії, зокрема приватному, без додаткових прав. На сторінці запуску з'являється зведення, а повний HTML-звіт додається артефактом `anylint-report`. Крок падає, якщо є знахідки (`fail-on-findings: 'false'` — лише показати).
+
+| Вхід | Типово | |
+|---|---|---|
+| `path` | `.` | файл чи тека для аналізу |
+| `args` | | додаткові аргументи перевірки (`--baseline ...`, `--jobs auto`), діляться за пробілами |
+| `fail-on-findings` | `true` | падати, якщо є знахідки; помилка конфігу падає завжди |
+| `sarif` | `false` | ще й вивантажити в GitHub Code Scanning — потрібні `permissions: security-events: write` (і GitHub Advanced Security для приватних репозиторіїв) |
+| `report` | `true` | HTML-звіт артефактом + зведення запуску |
+| `php-version` | `8.3` | PHP, яким запускається anylint |
+| `node` | `true` | встановити Node.js і AST-дампери; `false` для суто PHP-проєкту економить близько хвилини |
+
+Виходи: `findings`, `exit-code`, `sarif-file`, `report-file`. Поза action'ом `php bin/anylint src --github` друкує ті самі анотації в будь-якому workflow.
 
 ## Звіт про проєкт
 
@@ -192,6 +223,7 @@ tools/treesitter-ast-dump/dump.js  — tree-sitter (15 мов, LANG_CONFIG) -> �
   Ast/NodeDecoder.php    — канонічний JSON від dump.js / `nx ast` -> Node, з перевіркою форми
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (для --checkstyle)
   Formatters/SarifFormatter.php — Finding[] -> SARIF 2.1.0 (для --sarif)
+  Formatters/GithubFormatter.php — Finding[] -> workflow-команди GitHub Actions (для --github)
   Baseline.php, Fixer.php — --generate-baseline/--baseline, --fix
   ResultCache.php, ParallelRunner.php — кеш результатів, --jobs
   Providers/NodeWorker.php — один довгоживучий `node dump.js --serve` на dumper

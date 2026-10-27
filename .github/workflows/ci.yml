@@ -68,3 +68,41 @@ jobs:
         run: composer install --no-interaction --prefer-dist
       - name: Run test suite
         run: composer test
+
+  # Сам GitHub Action (action.yml) - запуск з цього ж коміту на фікстурі з
+  # двома відомими знахідками (порожній catch у PHP і except: pass у Python).
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the action without failing
+        id: anylint
+        uses: ./
+        with:
+          path: tests/fixtures/action
+          fail-on-findings: 'false'
+
+      - name: Check outputs
+        env:
+          FINDINGS: ${{ steps.anylint.outputs.findings }}
+          EXIT_CODE: ${{ steps.anylint.outputs.exit-code }}
+          REPORT: ${{ steps.anylint.outputs.report-file }}
+        run: |
+          test "$FINDINGS" = 2 || { echo "findings=$FINDINGS, expected 2"; exit 1; }
+          test "$EXIT_CODE" = 1 || { echo "exit-code=$EXIT_CODE, expected 1"; exit 1; }
+          grep -q 'empty-catch' "$REPORT"
+
+      - name: Run the action with fail-on-findings
+        id: failing
+        continue-on-error: true
+        uses: ./
+        with:
+          path: tests/fixtures/action
+          report: 'false'
+          node: 'false'
+
+      - name: Check that findings failed the step
+        env:
+          OUTCOME: ${{ steps.failing.outcome }}
+        run: test "$OUTCOME" = failure || { echo "outcome=$OUTCOME, expected failure"; exit 1; }

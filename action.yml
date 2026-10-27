@@ -1,0 +1,163 @@
+name: anylint
+description: Cross-language static analysis (PHP, JS/TS and 15 tree-sitter languages) with PR annotations, SARIF and an HTML report.
+author: Faneraiy14
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  path:
+    description: File or directory to analyze, relative to the repository root.
+    default: '.'
+  args:
+    description: >-
+      Extra arguments for the check, e.g. "--no-todo --jobs auto" or "--baseline anylint-baseline.json".
+      Split on spaces. anylint.json is picked up automatically.
+    default: ''
+  fail-on-findings:
+    description: Fail the step when there are findings. A config or usage error (exit code 2) always fails.
+    default: 'true'
+  sarif:
+    description: >-
+      Also upload results to GitHub Code Scanning. Needs "permissions: security-events: write";
+      private repositories also need GitHub Advanced Security.
+    default: 'false'
+  report:
+    description: Upload the HTML report (anylint report) as the "anylint-report" artifact and add a summary to the run page.
+    default: 'true'
+  php-version:
+    description: PHP version to run anylint with (8.1 or newer).
+    default: '8.3'
+  node:
+    description: >-
+      Install Node.js and the AST dumpers. Needed for everything except PHP and NyxilumLang;
+      set to "false" for a PHP-only project to save about a minute.
+    default: 'true'
+
+outputs:
+  findings:
+    description: Number of findings.
+    value: ${{ steps.check.outputs.findings }}
+  exit-code:
+    description: anylint exit code (0 - no findings, 1 - findings, 2 - error).
+    value: ${{ steps.check.outputs.exit-code }}
+  sarif-file:
+    description: Path to the SARIF file (when sarif is "true").
+    value: ${{ steps.sarif.outputs.file }}
+  report-file:
+    description: Path to the HTML report (when report is "true").
+    value: ${{ steps.report.outputs.file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ inputs.php-version }}
+        coverage: none
+        tools: composer
+
+    - name: Install anylint
+      shell: bash
+      env:
+        ANYLINT_DIR: ${{ github.action_path }}
+      run: composer install --no-dev --no-interaction --no-progress --prefer-dist --working-dir "$ANYLINT_DIR"
+
+    - name: Set up Node.js
+      if: inputs.node == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install AST dumpers
+      if: inputs.node == 'true'
+      shell: bash
+      env:
+        ANYLINT_DIR: ${{ github.action_path }}
+      run: |
+        npm ci --no-audit --no-fund --prefix "$ANYLINT_DIR/tools/js-ast-dump"
+        npm ci --no-audit --no-fund --prefix "$ANYLINT_DIR/tools/treesitter-ast-dump"
+
+    # Inputs go through env, never ${{ }} inside the script: a value with
+    # quotes or $(...) would otherwise run as shell code.
+    - name: Run anylint
+      id: check
+      shell: bash
+      env:
+        ANYLINT_DIR: ${{ github.action_path }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_ARGS: ${{ inputs.args }}
+      run: |
+        out="$RUNNER_TEMP/anylint-annotations.txt"
+        set +e
+        # INPUT_ARGS is split on spaces on purpose.
+        # shellcheck disable=SC2086
+        php "$ANYLINT_DIR/bin/anylint" "$INPUT_PATH" --github $INPUT_ARGS > "$out"
+        code=$?
+        set -e
+        cat "$out"
+        findings=$(grep -c '^::' "$out" || true)
+        echo "anylint: $findings finding(s), exit code $code"
+        echo "findings=$findings" >> "$GITHUB_OUTPUT"
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ "$code" -ge 2 ]; then
+          exit "$code"
+        fi
+
+    # The runs below reuse the result cache of the first one, so they are fast.
+    - name: Write SARIF
+      id: sarif
+      if: inputs.sarif == 'true'
+      shell: bash
+      env:
+        ANYLINT_DIR: ${{ github.action_path }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_ARGS: ${{ inputs.args }}
+      run: |
+        file="$RUNNER_TEMP/anylint.sarif"
+        # shellcheck disable=SC2086
+        php "$ANYLINT_DIR/bin/anylint" "$INPUT_PATH" --sarif $INPUT_ARGS > "$file" || [ $? -eq 1 ]
+        echo "file=$file" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF to Code Scanning
+      if: inputs.sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.sarif.outputs.file }}
+        category: anylint
+
+    - name: Build report
+      id: report
+      if: inputs.report == 'true'
+      shell: bash
+      env:
+        ANYLINT_DIR: ${{ github.action_path }}
+        INPUT_PATH: ${{ inputs.path }}
+      run: |
+        file="$RUNNER_TEMP/anylint-report.html"
+        php "$ANYLINT_DIR/bin/anylint" report "$INPUT_PATH" --format html --output "$file"
+        echo "file=$file" >> "$GITHUB_OUTPUT"
+        {
+          echo '## anylint'
+          echo '```'
+          php "$ANYLINT_DIR/bin/anylint" report "$INPUT_PATH"
+          echo '```'
+          echo 'Full report: the **anylint-report** artifact.'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload report
+      if: inputs.report == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: anylint-report
+        path: ${{ steps.report.outputs.file }}
+
+    - name: Fail on findings
+      if: inputs.fail-on-findings == 'true' && steps.check.outputs.exit-code == '1'
+      shell: bash
+      env:
+        FINDINGS: ${{ steps.check.outputs.findings }}
+      run: |
+        echo "::error title=anylint::$FINDINGS finding(s). Fix them, suppress with an anylint-disable comment, or accept with a baseline."
+        exit 1

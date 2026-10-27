@@ -13,6 +13,7 @@ use AnyLint\Fixer;
 use AnyLint\ParallelRunner;
 use AnyLint\ResultCache;
 use AnyLint\Formatters\CheckstyleFormatter;
+use AnyLint\Formatters\GithubFormatter;
 use AnyLint\Formatters\SarifFormatter;
 use AnyLint\Report\HtmlReport;
 use AnyLint\Report\ProjectReport;
@@ -59,7 +60,7 @@ if ($report) {
 }
 
 if (in_array('--help', $args, true) || $args === []) {
-    echo "anylint <шлях> [--json|--checkstyle|--sarif] [--fix] [--no-todo] [--jobs <N>] [--no-cache]\n";
+    echo "anylint <шлях> [--json|--checkstyle|--sarif|--github] [--fix] [--no-todo] [--jobs <N>] [--no-cache]\n";
     echo "        [--config <файл>] [--no-config] [--baseline <файл>] [--generate-baseline]\n";
     echo "anylint report <шлях> [--format text|json|html] [--output <файл>] [--no-todo] [--jobs <N>]\n";
     echo "        [--no-cache] [--config <файл>] [--no-config]\n";
@@ -69,6 +70,7 @@ if (in_array('--help', $args, true) || $args === []) {
     echo "  --checkstyle: вивід у форматі Checkstyle XML (File Watcher у PhpStorm та інших IDE\n";
     echo "                вміє імпортувати цей формат нативно, без окремого плагіна).\n";
     echo "  --sarif:      SARIF 2.1.0 (GitHub Code Scanning, GitLab, Azure DevOps).\n";
+    echo "  --github:     анотації GitHub Actions (::warning file=...) - видно прямо в диффі PR.\n";
     echo "  --fix:        застосувати автовиправлення, далі показати те, що лишилось.\n";
     echo "  --config <файл>: явний конфіг; без нього шукається anylint.json або\n";
     echo "                .anylint.json від теки шляху вгору. --no-config - не шукати.\n";
@@ -91,6 +93,7 @@ if (in_array('--help', $args, true) || $args === []) {
 $json = in_array('--json', $args, true);
 $checkstyle = in_array('--checkstyle', $args, true);
 $sarif = in_array('--sarif', $args, true);
+$github = in_array('--github', $args, true);
 $fix = in_array('--fix', $args, true);
 $noTodo = in_array('--no-todo', $args, true);
 $noConfig = in_array('--no-config', $args, true);
@@ -148,8 +151,8 @@ if (!$report && ($values['--format'] !== null || $values['--output'] !== null)) 
     fwrite(STDERR, "--format і --output - опції 'anylint report'.\n");
     exit(2);
 }
-if ($report && ($fix || $generateBaseline || $values['--baseline'] !== null || $json || $checkstyle || $sarif)) {
-    fwrite(STDERR, "'anylint report' не поєднується з --fix, --baseline, --generate-baseline, --json, --checkstyle, --sarif.\n");
+if ($report && ($fix || $generateBaseline || $values['--baseline'] !== null || $json || $checkstyle || $sarif || $github)) {
+    fwrite(STDERR, "'anylint report' не поєднується з --fix, --baseline, --generate-baseline, --json, --checkstyle, --sarif, --github.\n");
     exit(2);
 }
 
@@ -261,6 +264,11 @@ try {
 } catch (\RuntimeException $e) {
     fwrite(STDERR, $e->getMessage() . "\n");
     exit(2);
+}
+
+if ($github) {
+    echo GithubFormatter::format($findings, getcwd() ?: '.');
+    exit($findings === [] ? 0 : 1);
 }
 
 if ($sarif) {

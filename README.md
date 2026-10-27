@@ -58,12 +58,43 @@ php bin/anylint src --checkstyle # Checkstyle XML — PhpStorm/other JetBrains I
                                  # natively via a File Watcher, no custom plugin needed
 php bin/anylint src --no-todo   # skip the todo-tracker
 php bin/anylint src --sarif     # SARIF 2.1.0 — GitHub Code Scanning, GitLab, Azure DevOps
+php bin/anylint src --github    # GitHub Actions annotations (shown in the PR diff)
 php bin/anylint src --fix       # apply auto-fixes, then report what is left
 php bin/anylint src --no-cache  # ignore the result cache
 php bin/anylint src --jobs auto # analyze in parallel (one process per CPU core)
 ```
 
 Exit codes: `0` no findings, `1` findings, `2` usage/config error.
+
+## GitHub Action
+
+```yaml
+name: anylint
+on: [push, pull_request]
+jobs:
+  anylint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Faneraiy14/anylint@main
+        with:
+          path: src          # default: the whole repository
+          args: --no-todo    # extra CLI arguments, anylint.json is picked up anyway
+```
+
+Findings show up as annotations right in the PR diff — this works in any repository, private ones included, with no extra permissions. The run page gets a summary, and the full HTML report is attached as the `anylint-report` artifact. The step fails when there are findings (`fail-on-findings: 'false'` to only report).
+
+| Input | Default | |
+|---|---|---|
+| `path` | `.` | file or directory to analyze |
+| `args` | | extra arguments for the check (`--baseline ...`, `--jobs auto`), split on spaces |
+| `fail-on-findings` | `true` | fail the step on findings; a config error always fails |
+| `sarif` | `false` | also upload to GitHub Code Scanning — needs `permissions: security-events: write` (and GitHub Advanced Security for private repos) |
+| `report` | `true` | HTML report artifact + run summary |
+| `php-version` | `8.3` | PHP for running anylint |
+| `node` | `true` | install Node.js and the AST dumpers; `false` for a PHP-only project saves about a minute |
+
+Outputs: `findings`, `exit-code`, `sarif-file`, `report-file`. Outside the action, `php bin/anylint src --github` prints the same annotations in any workflow.
 
 ## Project report
 
@@ -192,6 +223,7 @@ tools/treesitter-ast-dump/dump.js  — tree-sitter (15 languages, LANG_CONFIG) -
   Ast/NodeDecoder.php    — canonical JSON from dump.js / `nx ast` -> Node, with shape checks
   Formatters/CheckstyleFormatter.php — Finding[] -> Checkstyle XML (for --checkstyle)
   Formatters/SarifFormatter.php — Finding[] -> SARIF 2.1.0 (for --sarif)
+  Formatters/GithubFormatter.php — Finding[] -> GitHub Actions workflow commands (for --github)
   Baseline.php, Fixer.php — --generate-baseline/--baseline, --fix
   ResultCache.php, ParallelRunner.php — result cache, --jobs
   Providers/NodeWorker.php — one long-lived `node dump.js --serve` per dumper
